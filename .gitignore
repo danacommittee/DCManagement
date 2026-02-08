@@ -1,0 +1,13 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+config/*.json
+
+# Dependencies
+node_modules/
+
+# Next
+.next
+out
+next-env.d.ts

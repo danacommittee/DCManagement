@@ -1,0 +1,26 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "email", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "attendance_links",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "secret", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

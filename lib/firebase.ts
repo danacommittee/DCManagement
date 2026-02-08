@@ -1,5 +1,5 @@
-import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
+import { getAuth, type Auth, type User } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,12 +11,23 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-let app: FirebaseApp;
-if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApps()[0] as FirebaseApp;
+/** Stub used during SSR/build when env vars are missing so Firebase is not initialized with invalid key */
+const authStub: Auth = {
+  currentUser: null,
+  onAuthStateChanged(_auth: Auth, cb: (u: User | null) => void) {
+    cb(null);
+    return () => {};
+  },
+} as unknown as Auth;
+
+function getFirebaseAuth(): Auth {
+  if (typeof window === "undefined") return authStub;
+  if (!firebaseConfig.apiKey || !firebaseConfig.projectId) return authStub;
+  const app = !getApps().length ? initializeApp(firebaseConfig) : (getApp() as FirebaseApp);
+  return getAuth(app);
 }
 
-export const auth = getAuth(app);
-export default app;
+export const auth = getFirebaseAuth();
+export const isFirebaseConfigured =
+  typeof window !== "undefined" && !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
+export default auth;

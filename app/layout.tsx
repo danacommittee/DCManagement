@@ -16,6 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Dana Committee Management System",
   description: "Volunteer operations during Shahr-e-Lillah al-Muazzam and year-round management",
+  icons: { icon: "/logo.png" },
 };
 
 export default function RootLayout({

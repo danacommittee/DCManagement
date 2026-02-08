@@ -8,7 +8,7 @@ import {
   signOut as firebaseSignOut,
   User,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import type { Role } from "@/types";
 
 interface MemberProfile {
@@ -41,11 +41,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProfile = async (uid: string, email: string | null) => {
+  const fetchProfile = async (firebaseUser: User) => {
+    const email = firebaseUser.email ?? null;
     if (!email) return;
     try {
+      const token = await firebaseUser.getIdToken();
       const res = await fetch("/api/auth/me", {
-        headers: { Authorization: `Bearer ${await auth.currentUser?.getIdToken()}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -66,9 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refetchProfile = async () => {
-    if (auth.currentUser?.email) {
-      await fetchProfile(auth.currentUser.uid, auth.currentUser.email);
-    }
+    if (auth.currentUser) await fetchProfile(auth.currentUser);
   };
 
   useEffect(() => {
@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
       }
-      await fetchProfile(firebaseUser.uid, firebaseUser.email != null ? firebaseUser.email : null);
+      await fetchProfile(firebaseUser);
       setLoading(false);
     });
     return () => unsub();
@@ -88,6 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     setError(null);
+    if (!isFirebaseConfigured) {
+      setError("App not configured. Check environment variables.");
+      return;
+    }
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
@@ -97,7 +101,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    if (isFirebaseConfigured) await firebaseSignOut(auth);
+    setUser(null);
     setProfile(null);
     setError(null);
   };

@@ -3,9 +3,9 @@ import { authAdmin, db } from "@/lib/firebase-admin";
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("Authorization");
-  const token = authHeader?.replace("Bearer ", "");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
   if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized", code: "NO_TOKEN" }, { status: 401 });
   }
   try {
     const decoded = await authAdmin.verifyIdToken(token);
@@ -72,7 +72,12 @@ export async function GET(req: NextRequest) {
     };
     return NextResponse.json({ member });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    const message = e instanceof Error ? e.message : String(e);
+    const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "VERIFY_FAILED";
+    console.error("[auth/me] Token verification failed:", code, message);
+    return NextResponse.json(
+      { error: "Invalid token", code: "INVALID_TOKEN" },
+      { status: 401 }
+    );
   }
 }

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
@@ -13,10 +13,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#0f172a",
+};
+
 export const metadata: Metadata = {
   title: "Dana Committee Management System",
   description: "Volunteer operations during Shahr-e-Lillah al-Muazzam and year-round management",
-  icons: { icon: "/logo.png" },
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/logo.png",
+    apple: "/icons/icon-192.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "DCMS",
+    statusBarStyle: "default",
+  },
 };
 
 export default function RootLayout({

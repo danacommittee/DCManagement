@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 
 export default function DashboardRootLayout({
@@ -12,13 +12,22 @@ export default function DashboardRootLayout({
 }) {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (loading) return;
     if (!user || !profile) {
       router.replace("/login");
+      return;
     }
-  }, [user, profile, loading, router]);
+    if (profile.role === "member" && pathname !== "/dashboard/attendance") {
+      router.replace("/dashboard/attendance");
+      return;
+    }
+    if (profile.role === "admin" && pathname === "/dashboard/members") {
+      router.replace("/dashboard");
+    }
+  }, [user, profile, loading, pathname, router]);
 
   if (loading || !profile) {
     return (

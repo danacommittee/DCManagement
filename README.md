@@ -12,8 +12,8 @@ Web app for Dana Committee volunteer operations (Shahr-e-Lillah al-Muazzam and y
 ## Roles
 
 - **Super Admin:** CSV upload (members with Name, Phone, Email, Role), teams CRUD, assign leaders/members, templates, send messages, generate attendance links, reports.
-- **Admin:** Manage assigned teams, submit attendance, templates, send messages, view reports for own teams.
-- **Member:** Login and view dashboard only.
+- **Admin:** Manage teams they lead, submit attendance (team + date), templates, send messages, reports by day. Cannot access Members page (no add/edit/delete members).
+- **Member:** Can only access **Attendance**: mark own attendance for today for their teams. If venue is configured, they must be within the radius to mark. Session expires after 20 minutes of inactivity.
 
 Only emails that exist in the member list (from CSV) can sign in. Super Admin assigns role per member (member, admin, super_admin) in the CSV or in the Members UI.
 
@@ -28,6 +28,10 @@ Only emails that exist in the member list (from CSV) can sign in. Super Admin as
    - Copy `.env.local` (already present) and ensure Firebase client env vars are set.
    - Firebase Admin: place the service account JSON in `config/` and set `GOOGLE_APPLICATION_CREDENTIALS` in `.env.local` (see existing comment).
    - Optional: `NEXT_PUBLIC_APP_URL` for attendance link origin (e.g. `https://your-app.vercel.app`).
+   - **Member attendance (location-gated):** To require members to be at a venue to mark attendance, set:
+     - `ATTENDANCE_VENUE_LAT` – venue centre latitude (e.g. `29.7604`)
+     - `ATTENDANCE_VENUE_LNG` – venue centre longitude (e.g. `-95.3698`)
+     - `ATTENDANCE_VENUE_RADIUS_METERS` – allowed radius in metres (e.g. `200`). You can use [Google Maps](https://www.google.com/maps) to get coordinates (right‑click a place → coordinates).
 
 3. **Firebase**
    - Enable **Authentication** → **Google** in Firebase Console.

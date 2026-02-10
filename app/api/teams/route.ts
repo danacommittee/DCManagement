@@ -27,6 +27,8 @@ export async function GET(req: NextRequest) {
     });
     if (myRole === "admin") {
       teams = teams.filter((t) => t.leaderId === myId);
+    } else if (myRole === "member") {
+      teams = teams.filter((t) => t.memberIds.includes(myId));
     }
     return NextResponse.json({ teams });
   } catch (e) {

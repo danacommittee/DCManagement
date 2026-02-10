@@ -34,6 +34,11 @@ export async function GET(req: NextRequest) {
         absentIds: Array.isArray(x.absentIds) ? x.absentIds : [],
       };
     });
+    if (myRole === "admin") {
+      const teamsSnap = await db.collection("teams").get();
+      const leaderTeamIds = new Set(teamsSnap.docs.filter((d) => d.data().leaderId === myId).map((d) => d.id));
+      records = records.filter((r) => leaderTeamIds.has(r.teamId));
+    }
     if (teamId) {
       const teamSnap = await db.collection("teams").doc(teamId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });

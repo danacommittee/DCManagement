@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 
@@ -14,10 +15,19 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const { profile } = useAuth();
+  const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (profile?.role === "member") {
+      router.replace("/dashboard/attendance");
+      return;
+    }
+  }, [profile?.role, router]);
+
+  useEffect(() => {
+    if (profile?.role === "member") return;
     const run = async () => {
       const headers = await getAuthHeaders();
       const res = await fetch("/api/dashboard", { headers });
@@ -28,8 +38,9 @@ export default function DashboardPage() {
       setLoading(false);
     };
     run();
-  }, []);
+  }, [profile?.role]);
 
+  if (profile?.role === "member") return null;
   if (loading || !stats) {
     return (
       <div>

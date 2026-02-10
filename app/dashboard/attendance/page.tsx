@@ -5,59 +5,109 @@ import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import type { Team } from "@/types";
 
+const TODAY = new Date().toISOString().slice(0, 10);
+
 export default function AttendancePage() {
   const { profile } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
-  const [records, setRecords] = useState<{ id: string; teamId: string; date: string; presentIds: string[]; absentIds: string[] }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedDate, setSelectedDate] = useState(TODAY);
+  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
+  const [record, setRecord] = useState<{ presentIds: string[]; absentIds: string[] } | null>(null);
+  const [choices, setChoices] = useState<{ id: string; present: boolean }[]>([]);
+  const [loadingRecord, setLoadingRecord] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [linkResult, setLinkResult] = useState<{ link: string } | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
-  const [submitTeamId, setSubmitTeamId] = useState("");
-  const [submitDate, setSubmitDate] = useState(new Date().toISOString().slice(0, 10));
-  const [memberChoices, setMemberChoices] = useState<{ id: string; present: boolean }[]>([]);
-  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
-  const [submitting, setSubmitting] = useState(false);
 
-  const isSuperOrAdmin = profile?.role === "super_admin" || profile?.role === "admin";
-  const myLeaderTeams = teams.filter((t) => t.leaderId === profile?.id);
-
-  const fetchTeams = async () => {
-    const headers = await getAuthHeaders();
-    const res = await fetch("/api/teams", { headers });
-    if (res.ok) {
-      const d = await res.json();
-      setTeams(d.teams);
-    }
-  };
-
-  const fetchRecords = async () => {
-    const headers = await getAuthHeaders();
-    const url = selectedTeamId
-      ? `/api/attendance?teamId=${encodeURIComponent(selectedTeamId)}`
-      : "/api/attendance";
-    const res = await fetch(url, { headers });
-    if (res.ok) {
-      const d = await res.json();
-      setRecords(d.records);
-    }
-  };
+  const isSuperAdmin = profile?.role === "super_admin";
+  const isAdmin = profile?.role === "admin";
+  const isMember = profile?.role === "member";
+  const canManageAttendance = isSuperAdmin || isAdmin;
+  const teamsForDropdown = canManageAttendance ? teams : [];
 
   useEffect(() => {
-    if (profile?.role === "member") {
+    if (!profile) return;
+    const run = async () => {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/teams", { headers });
+      if (res.ok) {
+        const d = await res.json();
+        setTeams(Array.isArray(d.teams) ? d.teams : []);
+      }
       setLoading(false);
+    };
+    run();
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!canManageAttendance || !selectedTeamId || !selectedDate) {
+      setMembers([]);
+      setRecord(null);
+      setChoices([]);
       return;
     }
-    fetchTeams().then(() => setLoading(false));
-  }, [profile?.role]);
+    setLoadingRecord(true);
+    getAuthHeaders()
+      .then((headers) =>
+        fetch(
+          `/api/attendance?teamId=${encodeURIComponent(selectedTeamId)}&date=${encodeURIComponent(selectedDate)}&expand=members`,
+          { headers }
+        )
+      )
+      .then((res) => res.json())
+      .then((d) => {
+        setMembers(d.members ?? []);
+        setRecord(d.record ?? null);
+        if (Array.isArray(d.members)) {
+          const presentIds = d.record?.presentIds ?? [];
+          setChoices(
+            d.members.map((m: { id: string }) => ({
+              id: m.id,
+              present: presentIds.includes(m.id),
+            }))
+          );
+        } else {
+          setChoices([]);
+        }
+      })
+      .catch(() => {
+        setMembers([]);
+        setRecord(null);
+        setChoices([]);
+      })
+      .finally(() => setLoadingRecord(false));
+  }, [canManageAttendance, selectedTeamId, selectedDate]);
 
-  useEffect(() => {
-    if (!profile || profile.role === "member") return;
-    fetchRecords();
-  }, [profile?.id, selectedTeamId]);
+  const submitLeaderAttendance = async () => {
+    if (!selectedTeamId || !selectedDate || !profile) return;
+    setSubmitting(true);
+    try {
+      const headers = await getAuthHeaders();
+      const presentIds = choices.filter((c) => c.present).map((c) => c.id);
+      const absentIds = choices.filter((c) => !c.present).map((c) => c.id);
+      const res = await fetch("/api/attendance", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          teamId: selectedTeamId,
+          date: selectedDate,
+          presentIds,
+          absentIds,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecord({ presentIds, absentIds });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const generateLink = async () => {
-    if (!submitTeamId || !isSuperOrAdmin) return;
+    if (!selectedTeamId || !canManageAttendance) return;
     setGeneratingLink(true);
     setLinkResult(null);
     try {
@@ -65,7 +115,7 @@ export default function AttendancePage() {
       const res = await fetch("/api/attendance/link", {
         method: "POST",
         headers,
-        body: JSON.stringify({ teamId: submitTeamId }),
+        body: JSON.stringify({ teamId: selectedTeamId }),
       });
       const data = await res.json();
       if (res.ok) setLinkResult({ link: data.link });
@@ -74,64 +124,33 @@ export default function AttendancePage() {
     }
   };
 
-  const loadMembersForSubmit = (teamId: string) => {
-    const t = teams.find((x) => x.id === teamId);
-    if (!t) return;
-    setSubmitTeamId(teamId);
-    setMembers(t.memberIds.map((id) => ({ id, name: id })));
-    setMemberChoices(t.memberIds.map((id) => ({ id, present: true })));
-  };
+  if (!profile) return null;
 
-  const submitAttendance = async () => {
-    if (!submitTeamId || !profile) return;
-    setSubmitting(true);
-    try {
-      const headers = await getAuthHeaders();
-      const presentIds = memberChoices.filter((c) => c.present).map((c) => c.id);
-      const absentIds = memberChoices.filter((c) => !c.present).map((c) => c.id);
-      await fetch("/api/attendance", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          teamId: submitTeamId,
-          date: submitDate,
-          presentIds,
-          absentIds,
-        }),
-      });
-      await fetchRecords();
-      setSubmitTeamId("");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (profile?.role === "member") {
+  // ——— Member: own attendance for today only, location-gated ———
+  if (isMember) {
     return (
-      <div>
-        <h1 className="mb-4 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
-        <p className="text-stone-500">You do not have access to this page.</p>
-      </div>
+      <MemberAttendanceView teams={teams} />
     );
   }
 
+  // ——— Super Admin / Admin: team + date dropdowns, mark members ———
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
 
-      {isSuperOrAdmin && (
+      {canManageAttendance && (
         <div className="mb-8 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
           <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Generate secure link (for team leaders)</h2>
           <div className="flex flex-wrap items-end gap-2">
             <div>
               <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
               <select
-                value={submitTeamId}
-                onChange={(e) => setSubmitTeamId(e.target.value)}
+                value={selectedTeamId}
+                onChange={(e) => setSelectedTeamId(e.target.value)}
                 className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               >
                 <option value="">Select team</option>
-                {teams.map((t) => (
+                {teamsForDropdown.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
@@ -139,7 +158,7 @@ export default function AttendancePage() {
             <button
               type="button"
               onClick={generateLink}
-              disabled={generatingLink || !submitTeamId}
+              disabled={generatingLink || !selectedTeamId}
               className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
             >
               {generatingLink ? "Generating..." : "Generate link"}
@@ -156,89 +175,207 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {myLeaderTeams.length > 0 && (
-        <div className="mb-8 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
-          <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Submit attendance (your teams)</h2>
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {myLeaderTeams.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => loadMembersForSubmit(t.id)}
-                  className="rounded border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-600"
-                >
-                  {t.name}
-                </button>
+      <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
+        <h2 className="mb-3 font-medium text-stone-900 dark:text-white">
+          {isSuperAdmin ? "Manage attendance (any team, any date)" : "Mark attendance (your teams)"}
+        </h2>
+        <div className="mb-4 flex flex-wrap gap-4">
+          <div>
+            <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
+            <select
+              value={selectedTeamId}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+              className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+            >
+              <option value="">Select team</option>
+              {teamsForDropdown.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
               ))}
-            </div>
-            {submitTeamId && (
-              <div className="rounded border border-stone-200 p-3 dark:border-stone-600">
-                <p className="mb-2 text-sm font-medium">Date</p>
-                <input
-                  type="date"
-                  value={submitDate}
-                  onChange={(e) => setSubmitDate(e.target.value)}
-                  className="mb-3 rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                />
-                <p className="mb-2 text-sm font-medium">Mark present/absent (member IDs – names load from team)</p>
-                <div className="max-h-48 space-y-1 overflow-y-auto">
-                  {memberChoices.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={c.present}
-                        onChange={() =>
-                          setMemberChoices((prev) =>
-                            prev.map((p) => (p.id === c.id ? { ...p, present: !p.present } : p))
-                          )
-                        }
-                      />
-                      {c.id}
-                    </label>
-                  ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date</label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+            />
+          </div>
+        </div>
+        {loadingRecord && <p className="text-sm text-stone-500">Loading members…</p>}
+        {!loadingRecord && selectedTeamId && selectedDate && (
+          <>
+            {members.length === 0 ? (
+              <p className="text-sm text-stone-500">No members in this team.</p>
+            ) : (
+              <>
+                <p className="mb-2 text-sm text-stone-600 dark:text-stone-400">Mark present/absent</p>
+                <div className="max-h-64 space-y-1 overflow-y-auto">
+                  {choices.map((c) => {
+                    const name = members.find((m) => m.id === c.id)?.name ?? c.id;
+                    return (
+                      <label key={c.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={c.present}
+                          onChange={() =>
+                            setChoices((prev) =>
+                              prev.map((p) => (p.id === c.id ? { ...p, present: !p.present } : p))
+                            )
+                          }
+                        />
+                        {name}
+                      </label>
+                    );
+                  })}
                 </div>
                 <button
                   type="button"
-                  onClick={submitAttendance}
+                  onClick={submitLeaderAttendance}
                   disabled={submitting}
-                  className="mt-3 rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                  className="mt-4 rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
                 >
-                  {submitting ? "Submitting..." : "Submit"}
+                  {submitting ? "Saving…" : "Save attendance"}
                 </button>
-              </div>
+              </>
             )}
-          </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemberAttendanceView({ teams }: { teams: Team[] }) {
+  const [venueRequired, setVenueRequired] = useState<boolean | null>(null);
+  const [locationOk, setLocationOk] = useState<boolean | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
+  const [marked, setMarked] = useState<Record<string, boolean>>({});
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/attendance/venue")
+      .then((res) => res.json())
+      .then((d) => setVenueRequired(d.required === true))
+      .catch(() => setVenueRequired(false));
+  }, []);
+
+  const requestLocation = () => {
+    setLocationError(null);
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by your browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocationOk(true);
+      },
+      () => {
+        setLocationOk(false);
+        setLocationError("Could not get your location. Please allow location access.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const canMark = venueRequired === false || (venueRequired === true && locationOk === true);
+
+  const markSelfPresent = async (teamId: string) => {
+    setSubmitting((s) => ({ ...s, [teamId]: true }));
+    try {
+      const headers = await getAuthHeaders();
+      const body: { teamId: string; date: string; memberSelf: boolean; lat?: number; lng?: number } = {
+        teamId,
+        date: TODAY,
+        memberSelf: true,
+      };
+      if (venueRequired && coords) {
+        body.lat = coords.lat;
+        body.lng = coords.lng;
+      }
+      const res = await fetch("/api/attendance", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMarked((m) => ({ ...m, [teamId]: true }));
+      } else {
+        setLocationError(data.error || "Failed to mark attendance.");
+      }
+    } finally {
+      setSubmitting((s) => ({ ...s, [teamId]: false }));
+    }
+  };
+
+  return (
+    <div>
+      <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
+      <p className="mb-4 text-sm text-stone-600 dark:text-stone-400">
+        Mark your attendance for today only. You can only mark yourself present for the teams you belong to.
+      </p>
+
+      {venueRequired === true && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+          <p className="mb-2 text-sm font-medium text-amber-800 dark:text-amber-200">Location required</p>
+          <p className="mb-3 text-sm text-amber-700 dark:text-amber-300">
+            You must be at the venue to mark attendance. Allow location access when prompted.
+          </p>
+          {locationOk !== true && (
+            <button
+              type="button"
+              onClick={requestLocation}
+              className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+            >
+              Allow location &amp; check
+            </button>
+          )}
+          {locationOk === true && (
+            <p className="text-sm text-green-700 dark:text-green-400">Location allowed. You can mark attendance below.</p>
+          )}
+          {locationError && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{locationError}</p>
+          )}
         </div>
       )}
 
-      <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
-        <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Recent attendance</h2>
-        <div className="mb-2">
-          <select
-            value={selectedTeamId}
-            onChange={(e) => setSelectedTeamId(e.target.value)}
-            className="rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-          >
-            <option value="">All teams</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-        </div>
-        {records.length === 0 ? (
-          <p className="text-sm text-stone-500">No records yet.</p>
+      {venueRequired === false && (
+        <p className="mb-4 text-sm text-stone-500">No location check is configured. You can mark attendance below.</p>
+      )}
+
+      <div className={`space-y-4 ${!canMark ? "pointer-events-none opacity-60" : ""}`}>
+        {teams.length === 0 ? (
+          <p className="text-sm text-stone-500">You are not in any team yet.</p>
         ) : (
-          <ul className="space-y-2 text-sm">
-            {records.map((r) => (
-              <li key={r.id} className="flex justify-between text-stone-600 dark:text-stone-300">
-                <span>Team {r.teamId} · {r.date}</span>
-                <span>Present: {r.presentIds.length}, Absent: {r.absentIds.length}</span>
-              </li>
-            ))}
-          </ul>
+          teams.map((t) => (
+            <div
+              key={t.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800"
+            >
+              <span className="font-medium text-stone-900 dark:text-white">{t.name}</span>
+              {marked[t.id] ? (
+                <span className="text-sm text-green-600 dark:text-green-400">Marked present for today</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => markSelfPresent(t.id)}
+                  disabled={!canMark || submitting[t.id]}
+                  className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {submitting[t.id] ? "Saving…" : "Mark present today"}
+                </button>
+              )}
+            </div>
+          ))
         )}
       </div>
+      {!canMark && venueRequired === true && (
+        <p className="mt-4 text-sm text-stone-500">Enable location access above to mark attendance.</p>
+      )}
     </div>
   );
 }

@@ -22,6 +22,8 @@ export async function PATCH(
     if (typeof body.name === "string") updates.name = body.name;
     if (body.leaderId !== undefined) updates.leaderId = body.leaderId;
     if (Array.isArray(body.memberIds)) updates.memberIds = body.memberIds;
+    if (typeof body.dayOfWeek === "number" && body.dayOfWeek >= 0 && body.dayOfWeek <= 6) updates.dayOfWeek = body.dayOfWeek;
+    if (body.isWrapUp !== undefined) updates.isWrapUp = body.isWrapUp === true;
 
     const teamSnap = await db.collection("teams").doc(id).get();
     if (!teamSnap.exists) return NextResponse.json({ error: "Not found" }, { status: 404 });

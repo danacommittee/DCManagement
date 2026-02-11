@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
@@ -13,10 +14,19 @@ interface DashboardStats {
   recentMessages: { id: string; sentAt: number; recipientCount: number }[];
 }
 
+interface UpcomingEvent {
+  id: string;
+  name: string;
+  dateFrom: string;
+  dateTo: string;
+  teamIds: string[];
+}
+
 export default function DashboardPage() {
   const { profile } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,10 +40,17 @@ export default function DashboardPage() {
     if (profile?.role === "member") return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const res = await fetch("/api/dashboard", { headers });
-      if (res.ok) {
-        const data = await res.json();
+      const [dashboardRes, eventsRes] = await Promise.all([
+        fetch("/api/dashboard", { headers }),
+        fetch("/api/events?upcoming=true&limit=5", { headers }),
+      ]);
+      if (dashboardRes.ok) {
+        const data = await dashboardRes.json();
         setStats(data);
+      }
+      if (eventsRes.ok) {
+        const d = await eventsRes.json();
+        setUpcomingEvents(d.events ?? []);
       }
       setLoading(false);
     };
@@ -55,6 +72,25 @@ export default function DashboardPage() {
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">
         Dashboard
       </h1>
+      {upcomingEvents.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Upcoming events</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {upcomingEvents.map((ev) => (
+              <Link
+                key={ev.id}
+                href={`/dashboard/events/${ev.id}`}
+                className="block rounded-xl border border-stone-200 bg-white p-4 shadow-sm transition hover:border-amber-400 dark:border-stone-700 dark:bg-stone-800 dark:hover:border-amber-600"
+              >
+                <p className="font-medium text-stone-900 dark:text-white">{ev.name}</p>
+                <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                  {new Date(ev.dateFrom).toLocaleString()} – {new Date(ev.dateTo).toLocaleString()}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="mb-8 grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-800">
           <p className="text-sm font-medium text-stone-500 dark:text-stone-400">Total Members</p>

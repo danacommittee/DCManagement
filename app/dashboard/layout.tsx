@@ -20,7 +20,7 @@ export default function DashboardRootLayout({
       router.replace("/login");
       return;
     }
-    if (profile.role === "member" && pathname !== "/dashboard/attendance") {
+    if (profile.role === "member" && pathname !== "/dashboard/attendance" && pathname !== "/dashboard/events" && !pathname.startsWith("/dashboard/events/")) {
       router.replace("/dashboard/attendance");
       return;
     }

@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
     const myId = membersSnap.docs[0].id;
 
     const { searchParams } = new URL(req.url);
+    const eventId = searchParams.get("eventId");
     const teamId = searchParams.get("teamId");
     const date = searchParams.get("date");
     const from = searchParams.get("from");
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
       const x = d.data();
       return {
         id: d.id,
+        eventId: x.eventId,
         teamId: x.teamId,
         date: x.date,
         submittedBy: x.submittedBy,
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
         createdAt: x.createdAt,
       };
     });
+    if (eventId) records = records.filter((r) => r.eventId === eventId);
 
     if (myRole === "admin") {
       const teamsSnap = await db.collection("teams").get();
@@ -110,6 +113,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const memberSelf = body.memberSelf === true;
+    const eventId = typeof body.eventId === "string" ? body.eventId : null;
     const teamId = body.teamId;
     const date = body.date;
     let presentIds = Array.isArray(body.presentIds) ? body.presentIds : [];
@@ -143,7 +147,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const existing = await db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date).limit(1).get();
+      if (eventId) {
+        const eventSnap = await db.collection("events").doc(eventId).get();
+        if (!eventSnap.exists) return NextResponse.json({ error: "Event not found" }, { status: 400 });
+        const ev = eventSnap.data()!;
+        const teamIds = (ev.teamIds as string[]) || [];
+        if (!teamIds.includes(teamId)) return NextResponse.json({ error: "Team not in this event" }, { status: 403 });
+        const fromStr = (ev.dateFrom as string).slice(0, 10);
+        const toStr = (ev.dateTo as string).slice(0, 10);
+        if (date < fromStr || date > toStr) return NextResponse.json({ error: "Date not in event range" }, { status: 403 });
+      }
+
+      const existingQuery = db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date);
+      const existing = await existingQuery.limit(1).get();
       const now = Date.now();
       let newPresent: string[];
       let newAbsent: string[];
@@ -157,23 +173,22 @@ export async function POST(req: NextRequest) {
         newPresent = [myId];
         newAbsent = memberIds.filter((id) => id !== myId);
       }
-      if (!existing.empty) {
-        await existing.docs[0].ref.update({
-          presentIds: newPresent,
-          absentIds: newAbsent,
-          submittedBy: myId,
-          updatedAt: now,
-        });
-        return NextResponse.json({ ok: true, id: existing.docs[0].id });
-      }
-      const ref = await db.collection("attendance").add({
+      const docData = {
+        ...(eventId ? { eventId } : {}),
         teamId,
         date,
         submittedBy: myId,
         presentIds: newPresent,
         absentIds: newAbsent,
-        createdAt: now,
         updatedAt: now,
+      };
+      if (!existing.empty) {
+        await existing.docs[0].ref.update(docData);
+        return NextResponse.json({ ok: true, id: existing.docs[0].id });
+      }
+      const ref = await db.collection("attendance").add({
+        ...docData,
+        createdAt: now,
       });
       return NextResponse.json({ ok: true, id: ref.id });
     }
@@ -186,15 +201,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only team leader or super admin can submit full attendance" }, { status: 403 });
     }
 
+    if (eventId) {
+      const eventSnap = await db.collection("events").doc(eventId).get();
+      if (!eventSnap.exists) return NextResponse.json({ error: "Event not found" }, { status: 400 });
+      const ev = eventSnap.data()!;
+      const teamIds = (ev.teamIds as string[]) || [];
+      if (!teamIds.includes(teamId)) return NextResponse.json({ error: "Team not in this event" }, { status: 403 });
+      const fromStr = (ev.dateFrom as string).slice(0, 10);
+      const toStr = (ev.dateTo as string).slice(0, 10);
+      if (date < fromStr || date > toStr) return NextResponse.json({ error: "Date not in event range" }, { status: 403 });
+    }
+
     const existing = await db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date).limit(1).get();
     const now = Date.now();
+    const docData = {
+      ...(eventId ? { eventId } : {}),
+      presentIds,
+      absentIds,
+      submittedBy: myId,
+      updatedAt: now,
+    };
     if (!existing.empty) {
-      await existing.docs[0].ref.update({
-        presentIds,
-        absentIds,
-        submittedBy: myId,
-        updatedAt: now,
-      });
+      await existing.docs[0].ref.update(docData);
       return NextResponse.json({ ok: true, id: existing.docs[0].id });
     }
     const ref = await db.collection("attendance").add({
@@ -205,6 +233,7 @@ export async function POST(req: NextRequest) {
       absentIds,
       createdAt: now,
       updatedAt: now,
+      ...(eventId ? { eventId } : {}),
     });
     return NextResponse.json({ ok: true, id: ref.id });
   } catch (e) {

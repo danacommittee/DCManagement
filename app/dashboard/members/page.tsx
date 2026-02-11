@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth } from "@/lib/firebase";
 import { getAuthHeaders } from "@/lib/api";
@@ -10,7 +11,8 @@ import type { Role } from "@/types";
 const TITLES = ["", "Mulla", "Shaikh", "bhai", "bhen"];
 
 export default function MembersPage() {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
+  const router = useRouter();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -129,11 +131,23 @@ export default function MembersPage() {
     if (!editingId) return;
     try {
       const headers = await getAuthHeaders();
-      await fetch(`/api/members/${editingId}`, {
+      const res = await fetch(`/api/members/${editingId}`, {
         method: "PATCH",
         headers,
         body: JSON.stringify(editForm),
       });
+      if (!res.ok) {
+        console.error("Failed to update member", await res.text());
+        return;
+      }
+
+      // If the current user changed their own role, sign them out so permissions refresh
+      if (profile && editingId === profile.id && editForm.role && editForm.role !== profile.role) {
+        await signOut();
+        router.replace("/login");
+        return;
+      }
+
       await fetchMembers();
       setEditingId(null);
       setEditForm({});

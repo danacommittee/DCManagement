@@ -10,6 +10,7 @@ import type { Role } from "@/types";
 const navByRole: Record<Role, { label: string; href: string }[]> = {
   super_admin: [
     { label: "Dashboard", href: "/dashboard" },
+    { label: "Events", href: "/dashboard/events" },
     { label: "Members", href: "/dashboard/members" },
     { label: "Teams", href: "/dashboard/teams" },
     { label: "Templates", href: "/dashboard/templates" },
@@ -19,13 +20,17 @@ const navByRole: Record<Role, { label: string; href: string }[]> = {
   ],
   admin: [
     { label: "Dashboard", href: "/dashboard" },
+    { label: "Events", href: "/dashboard/events" },
     { label: "Teams", href: "/dashboard/teams" },
     { label: "Templates", href: "/dashboard/templates" },
     { label: "Send Message", href: "/dashboard/messages" },
     { label: "Attendance", href: "/dashboard/attendance" },
     { label: "Reports", href: "/dashboard/reports" },
   ],
-  member: [{ label: "Attendance", href: "/dashboard/attendance" }],
+  member: [
+    { label: "Events", href: "/dashboard/events" },
+    { label: "Attendance", href: "/dashboard/attendance" },
+  ],
 };
 
 export default function DashboardLayout({

@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const format = searchParams.get("format") || "json";
+    const eventId = searchParams.get("eventId");
     const teamId = searchParams.get("teamId");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest) {
       const x = d.data();
       return {
         id: d.id,
+        eventId: x.eventId,
         teamId: x.teamId,
         date: x.date,
         submittedBy: x.submittedBy,
@@ -34,6 +36,7 @@ export async function GET(req: NextRequest) {
         absentIds: Array.isArray(x.absentIds) ? x.absentIds : [],
       };
     });
+    if (eventId) records = records.filter((r) => r.eventId === eventId);
     if (myRole === "admin") {
       const teamsSnap = await db.collection("teams").get();
       const leaderTeamIds = new Set(teamsSnap.docs.filter((d) => d.data().leaderId === myId).map((d) => d.id));

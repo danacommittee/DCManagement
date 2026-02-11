@@ -24,6 +24,24 @@ export interface Team {
   name: string;
   leaderId: string | null;
   memberIds: string[];
+  /** 0=Sun, 1=Mon, ... 6=Sat; only for wrap-up day teams */
+  dayOfWeek?: number;
+  /** True for Monday Wrap-up, Tuesday Wrap-up, etc. */
+  isWrapUp?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Event {
+  id: string;
+  name: string;
+  /** ISO date-time string (e.g. "2025-03-01T08:00:00") */
+  dateFrom: string;
+  dateTo: string;
+  teamIds: string[];
+  /** Per-team overrides for this event only: memberIds and/or leaderId */
+  teamOverrides?: Record<string, { memberIds?: string[]; leaderId?: string }>;
+  createdBy?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +70,7 @@ export interface Message {
 
 export interface AttendanceRecord {
   id: string;
+  eventId?: string;
   teamId: string;
   date: string;
   submittedBy: string;

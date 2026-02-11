@@ -8,6 +8,8 @@ import type { Team } from "@/types";
 export default function ReportsPage() {
   const { profile } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
+  const [events, setEvents] = useState<{ id: string; name: string }[]>([]);
+  const [eventId, setEventId] = useState("");
   const [teamId, setTeamId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -20,9 +22,22 @@ export default function ReportsPage() {
   useEffect(() => {
     if (profile?.role === "member") return;
     getAuthHeaders()
-      .then((headers) => fetch("/api/teams", { headers }))
-      .then((res) => (res.ok ? res.json() : { teams: [] }))
-      .then((d) => setTeams(Array.isArray(d.teams) ? d.teams : []));
+      .then((headers) =>
+        Promise.all([
+          fetch("/api/teams", { headers }),
+          fetch("/api/events?limit=100", { headers }),
+        ])
+      )
+      .then(([teamsRes, eventsRes]) =>
+        Promise.all([
+          teamsRes.ok ? teamsRes.json() : { teams: [] },
+          eventsRes.ok ? eventsRes.json() : { events: [] },
+        ])
+      )
+      .then(([teamsData, eventsData]) => {
+        setTeams(Array.isArray(teamsData.teams) ? teamsData.teams : []);
+        setEvents(Array.isArray(eventsData.events) ? eventsData.events : []);
+      });
   }, [profile?.role]);
 
   const downloadCsv = async () => {
@@ -31,6 +46,7 @@ export default function ReportsPage() {
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       params.set("format", "csv");
+      if (eventId) params.set("eventId", eventId);
       if (teamId) params.set("teamId", teamId);
       if (isAdmin && selectedDate) {
         params.set("from", selectedDate);
@@ -68,6 +84,21 @@ export default function ReportsPage() {
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Reports</h1>
       <div className="max-w-md space-y-4 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+            Event (optional)
+          </label>
+          <select
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
+            className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+          >
+            <option value="">All events</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.name}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
             Team (optional)

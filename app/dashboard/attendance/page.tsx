@@ -4,13 +4,29 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import type { Team } from "@/types";
+import type { Event } from "@/types";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
+function getDatesInRange(dateFrom: string, dateTo: string): string[] {
+  const from = new Date(dateFrom);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(dateTo);
+  to.setHours(0, 0, 0, 0);
+  const out: string[] = [];
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 export default function AttendancePage() {
   const { profile } = useAuth();
+  const [events, setEvents] = useState<Event[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
@@ -25,21 +41,51 @@ export default function AttendancePage() {
   const isAdmin = profile?.role === "admin";
   const isMember = profile?.role === "member";
   const canManageAttendance = isSuperAdmin || isAdmin;
-  const teamsForDropdown = canManageAttendance ? teams : [];
+  const eventDates = selectedEvent ? getDatesInRange(selectedEvent.dateFrom, selectedEvent.dateTo) : [];
+  const teamsInEvent =
+    selectedEvent && teams.length > 0
+      ? selectedEvent.teamIds.map((tid) => teams.find((t) => t.id === tid)).filter(Boolean) as Team[]
+      : [];
+  const teamsForDropdown = canManageAttendance ? (selectedEventId ? teamsInEvent : teams) : [];
 
   useEffect(() => {
     if (!profile) return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const res = await fetch("/api/teams", { headers });
-      if (res.ok) {
-        const d = await res.json();
+      const [teamsRes, eventsRes] = await Promise.all([
+        fetch("/api/teams", { headers }),
+        fetch("/api/events?limit=100", { headers }),
+      ]);
+      if (teamsRes.ok) {
+        const d = await teamsRes.json();
         setTeams(Array.isArray(d.teams) ? d.teams : []);
+      }
+      if (eventsRes?.ok) {
+        const d = await eventsRes.json();
+        setEvents(d.events ?? []);
       }
       setLoading(false);
     };
     run();
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!selectedEventId || !canManageAttendance) {
+      setSelectedEvent(null);
+      return;
+    }
+    getAuthHeaders()
+      .then((headers) => fetch(`/api/events/${selectedEventId}`, { headers }))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => {
+        setSelectedEvent(d?.event ?? null);
+        if (d?.event?.dateFrom && d?.event?.dateTo) {
+          const dates = getDatesInRange(d.event.dateFrom, d.event.dateTo);
+          setSelectedDate(dates.includes(TODAY) ? TODAY : dates[0] ?? TODAY);
+        }
+      })
+      .catch(() => setSelectedEvent(null));
+  }, [selectedEventId, canManageAttendance]);
 
   useEffect(() => {
     if (!canManageAttendance || !selectedTeamId || !selectedDate) {
@@ -49,13 +95,14 @@ export default function AttendancePage() {
       return;
     }
     setLoadingRecord(true);
+    const params = new URLSearchParams({
+      teamId: selectedTeamId,
+      date: selectedDate,
+      expand: "members",
+    });
+    if (selectedEventId) params.set("eventId", selectedEventId);
     getAuthHeaders()
-      .then((headers) =>
-        fetch(
-          `/api/attendance?teamId=${encodeURIComponent(selectedTeamId)}&date=${encodeURIComponent(selectedDate)}&expand=members`,
-          { headers }
-        )
-      )
+      .then((headers) => fetch(`/api/attendance?${params}`, { headers }))
       .then((res) => res.json())
       .then((d) => {
         setMembers(d.members ?? []);
@@ -78,7 +125,7 @@ export default function AttendancePage() {
         setChoices([]);
       })
       .finally(() => setLoadingRecord(false));
-  }, [canManageAttendance, selectedTeamId, selectedDate]);
+  }, [canManageAttendance, selectedTeamId, selectedDate, selectedEventId]);
 
   const submitLeaderAttendance = async () => {
     if (!selectedTeamId || !selectedDate || !profile) return;
@@ -91,6 +138,7 @@ export default function AttendancePage() {
         method: "POST",
         headers,
         body: JSON.stringify({
+          ...(selectedEventId ? { eventId: selectedEventId } : {}),
           teamId: selectedTeamId,
           date: selectedDate,
           presentIds,
@@ -126,10 +174,18 @@ export default function AttendancePage() {
 
   if (!profile) return null;
 
-  // ——— Member: own attendance for today only, location-gated ———
+  // ——— Member: own attendance for today only, location-gated; event-based when events include today ———
   if (isMember) {
     return (
-      <MemberAttendanceView teams={teams} />
+      <MemberAttendanceView
+        teams={teams}
+        events={events.filter((e) => {
+          const from = e.dateFrom.slice(0, 10);
+          const to = e.dateTo.slice(0, 10);
+          return TODAY >= from && TODAY <= to;
+        })}
+        myTeamIds={profile?.teamIds ?? []}
+      />
     );
   }
 
@@ -177,9 +233,25 @@ export default function AttendancePage() {
 
       <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
         <h2 className="mb-3 font-medium text-stone-900 dark:text-white">
-          {isSuperAdmin ? "Manage attendance (any team, any date)" : "Mark attendance (your teams)"}
+          {isSuperAdmin ? "Manage attendance (by event or ad-hoc)" : "Mark attendance (your teams)"}
         </h2>
         <div className="mb-4 flex flex-wrap gap-4">
+          <div>
+            <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Event (optional)</label>
+            <select
+              value={selectedEventId}
+              onChange={(e) => {
+                setSelectedEventId(e.target.value);
+                setSelectedTeamId("");
+              }}
+              className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+            >
+              <option value="">No event (ad-hoc)</option>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
             <select
@@ -195,12 +267,24 @@ export default function AttendancePage() {
           </div>
           <div>
             <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-            />
+            {selectedEventId && eventDates.length > 0 ? (
+              <select
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+              >
+                {eventDates.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+              />
+            )}
           </div>
         </div>
         {loadingRecord && <p className="text-sm text-stone-500">Loading members…</p>}
@@ -247,13 +331,23 @@ export default function AttendancePage() {
   );
 }
 
-function MemberAttendanceView({ teams }: { teams: Team[] }) {
+function MemberAttendanceView({
+  teams,
+  events,
+  myTeamIds,
+}: {
+  teams: Team[];
+  events: Event[];
+  myTeamIds: string[];
+}) {
   const [venueRequired, setVenueRequired] = useState<boolean | null>(null);
   const [locationOk, setLocationOk] = useState<boolean | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
   const [marked, setMarked] = useState<Record<string, boolean>>({});
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  const eventTeamKey = (eventId: string, teamId: string) => `${eventId}:${teamId}`;
 
   useEffect(() => {
     fetch("/api/attendance/venue")
@@ -283,15 +377,17 @@ function MemberAttendanceView({ teams }: { teams: Team[] }) {
 
   const canMark = venueRequired === false || (venueRequired === true && locationOk === true);
 
-  const markSelfPresent = async (teamId: string) => {
-    setSubmitting((s) => ({ ...s, [teamId]: true }));
+  const markSelfPresent = async (teamId: string, eventId?: string) => {
+    const key = eventId ? eventTeamKey(eventId, teamId) : teamId;
+    setSubmitting((s) => ({ ...s, [key]: true }));
     try {
       const headers = await getAuthHeaders();
-      const body: { teamId: string; date: string; memberSelf: boolean; lat?: number; lng?: number } = {
+      const body: { teamId: string; date: string; memberSelf: boolean; eventId?: string; lat?: number; lng?: number } = {
         teamId,
         date: TODAY,
         memberSelf: true,
       };
+      if (eventId) body.eventId = eventId;
       if (venueRequired && coords) {
         body.lat = coords.lat;
         body.lng = coords.lng;
@@ -303,12 +399,12 @@ function MemberAttendanceView({ teams }: { teams: Team[] }) {
       });
       const data = await res.json();
       if (res.ok) {
-        setMarked((m) => ({ ...m, [teamId]: true }));
+        setMarked((m) => ({ ...m, [key]: true }));
       } else {
         setLocationError(data.error || "Failed to mark attendance.");
       }
     } finally {
-      setSubmitting((s) => ({ ...s, [teamId]: false }));
+      setSubmitting((s) => ({ ...s, [key]: false }));
     }
   };
 
@@ -348,7 +444,40 @@ function MemberAttendanceView({ teams }: { teams: Team[] }) {
       )}
 
       <div className={`space-y-4 ${!canMark ? "pointer-events-none opacity-60" : ""}`}>
-        {teams.length === 0 ? (
+        {events.length > 0 ? (
+          events.map((ev) => {
+            const myTeamsInEvent = teams.filter((t) => ev.teamIds.includes(t.id) && myTeamIds.includes(t.id));
+            if (myTeamsInEvent.length === 0) return null;
+            return (
+              <div key={ev.id} className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
+                <p className="mb-2 font-medium text-stone-900 dark:text-white">{ev.name}</p>
+                <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">Today is within this event. Mark attendance for your team(s):</p>
+                <ul className="space-y-2">
+                  {myTeamsInEvent.map((t) => {
+                    const key = eventTeamKey(ev.id, t.id);
+                    return (
+                      <li key={t.id} className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm text-stone-700 dark:text-stone-300">{t.name}</span>
+                        {marked[key] ? (
+                          <span className="text-sm text-green-600 dark:text-green-400">Marked present</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => markSelfPresent(t.id, ev.id)}
+                            disabled={!canMark || submitting[key]}
+                            className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                          >
+                            {submitting[key] ? "Saving…" : "Mark present"}
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })
+        ) : teams.length === 0 ? (
           <p className="text-sm text-stone-500">You are not in any team yet.</p>
         ) : (
           teams.map((t) => (

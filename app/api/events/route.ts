@@ -26,6 +26,8 @@ export async function GET(req: NextRequest) {
         dateTo: x.dateTo,
         teamIds: Array.isArray(x.teamIds) ? x.teamIds : [],
         teamOverrides: x.teamOverrides != null ? x.teamOverrides : undefined,
+        overallStartTime: x.overallStartTime,
+        overallEndTime: x.overallEndTime,
         createdBy: x.createdBy,
         createdAt: x.createdAt,
         updatedAt: x.updatedAt,

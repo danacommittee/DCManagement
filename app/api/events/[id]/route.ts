@@ -25,6 +25,8 @@ export async function GET(
       dateTo: x.dateTo,
       teamIds: Array.isArray(x.teamIds) ? x.teamIds : [],
       teamOverrides: x.teamOverrides != null ? x.teamOverrides : undefined,
+      overallStartTime: x.overallStartTime,
+      overallEndTime: x.overallEndTime,
       createdBy: x.createdBy,
       createdAt: x.createdAt,
       updatedAt: x.updatedAt,
@@ -79,6 +81,16 @@ export async function PATCH(
     if (typeof body.dateTo === "string") updates.dateTo = body.dateTo.trim();
     if (Array.isArray(body.teamIds)) updates.teamIds = body.teamIds;
     if (body.teamOverrides !== undefined) updates.teamOverrides = body.teamOverrides;
+    if (typeof body.overallStartTime === "string" || typeof body.overallEndTime === "string") {
+      const evData = snap.data()!;
+      const eventEndDate = (evData.dateTo as string).slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      if (eventEndDate > today) {
+        return NextResponse.json({ error: "Cannot set overall event time for future events" }, { status: 403 });
+      }
+      if (typeof body.overallStartTime === "string") updates.overallStartTime = body.overallStartTime.trim() || null;
+      if (typeof body.overallEndTime === "string") updates.overallEndTime = body.overallEndTime.trim() || null;
+    }
 
     await db.collection("events").doc(id).update(updates);
     return NextResponse.json({ ok: true });

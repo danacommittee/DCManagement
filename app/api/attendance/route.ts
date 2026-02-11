@@ -32,6 +32,9 @@ export async function GET(req: NextRequest) {
         submittedBy: x.submittedBy,
         presentIds: Array.isArray(x.presentIds) ? x.presentIds : [],
         absentIds: Array.isArray(x.absentIds) ? x.absentIds : [],
+        startTime: x.startTime,
+        endTime: x.endTime,
+        notes: x.notes,
         createdAt: x.createdAt,
       };
     });
@@ -70,7 +73,16 @@ export async function GET(req: NextRequest) {
         membersMap.set(d.id, name);
       });
       const members = memberIds.map((id) => ({ id, name: membersMap.get(id) || id }));
-      const record = records[0] ?? null;
+      const rec = records[0];
+      const record = rec
+        ? {
+            presentIds: rec.presentIds,
+            absentIds: rec.absentIds,
+            startTime: rec.startTime,
+            endTime: rec.endTime,
+            notes: rec.notes,
+          }
+        : null;
       return NextResponse.json({ records, record, members });
     }
 
@@ -118,10 +130,15 @@ export async function POST(req: NextRequest) {
     const date = body.date;
     let presentIds = Array.isArray(body.presentIds) ? body.presentIds : [];
     let absentIds = Array.isArray(body.absentIds) ? body.absentIds : [];
+    const startTime = typeof body.startTime === "string" ? body.startTime.trim() : null;
+    const endTime = typeof body.endTime === "string" ? body.endTime.trim() : null;
+    const notes = typeof body.notes === "string" ? body.notes.trim() : null;
     const lat = typeof body.lat === "number" ? body.lat : null;
     const lng = typeof body.lng === "number" ? body.lng : null;
 
     if (!teamId || !date) return NextResponse.json({ error: "teamId and date required" }, { status: 400 });
+    const today = new Date().toISOString().slice(0, 10);
+    if (date > today) return NextResponse.json({ error: "Cannot submit attendance for future dates" }, { status: 403 });
 
     const teamSnap = await db.collection("teams").doc(teamId).get();
     if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
@@ -130,7 +147,6 @@ export async function POST(req: NextRequest) {
 
     if (memberSelf) {
       if (myRole !== "member") return NextResponse.json({ error: "memberSelf only for members" }, { status: 403 });
-      const today = new Date().toISOString().slice(0, 10);
       if (date !== today) return NextResponse.json({ error: "Members can only mark attendance for today" }, { status: 403 });
       if (!memberIds.includes(myId)) return NextResponse.json({ error: "You are not in this team" }, { status: 403 });
 
@@ -214,13 +230,16 @@ export async function POST(req: NextRequest) {
 
     const existing = await db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date).limit(1).get();
     const now = Date.now();
-    const docData = {
+    const docData: Record<string, unknown> = {
       ...(eventId ? { eventId } : {}),
       presentIds,
       absentIds,
       submittedBy: myId,
       updatedAt: now,
     };
+    if (startTime != null) docData.startTime = startTime;
+    if (endTime != null) docData.endTime = endTime;
+    if (notes != null) docData.notes = notes;
     if (!existing.empty) {
       await existing.docs[0].ref.update(docData);
       return NextResponse.json({ ok: true, id: existing.docs[0].id });
@@ -234,6 +253,9 @@ export async function POST(req: NextRequest) {
       createdAt: now,
       updatedAt: now,
       ...(eventId ? { eventId } : {}),
+      ...(startTime != null ? { startTime } : {}),
+      ...(endTime != null ? { endTime } : {}),
+      ...(notes != null ? { notes } : {}),
     });
     return NextResponse.json({ ok: true, id: ref.id });
   } catch (e) {

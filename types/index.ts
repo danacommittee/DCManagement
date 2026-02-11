@@ -41,6 +41,9 @@ export interface Event {
   teamIds: string[];
   /** Per-team overrides for this event only: memberIds and/or leaderId */
   teamOverrides?: Record<string, { memberIds?: string[]; leaderId?: string }>;
+  /** Overall event duration (super admin only) */
+  overallStartTime?: string;
+  overallEndTime?: string;
   createdBy?: string;
   createdAt: number;
   updatedAt: number;
@@ -76,5 +79,9 @@ export interface AttendanceRecord {
   submittedBy: string;
   presentIds: string[];
   absentIds: string[];
+  /** Per-team per-day tracking */
+  startTime?: string;
+  endTime?: string;
+  notes?: string;
   createdAt: number;
 }

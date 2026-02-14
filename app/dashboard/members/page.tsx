@@ -34,8 +34,24 @@ export default function MembersPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const canManage = profile?.role === "super_admin";
+
+  const searchLower = searchQuery.trim().toLowerCase();
+  const filteredMembers = searchLower
+    ? members.filter(
+        (m) =>
+          (m.name && m.name.toLowerCase().includes(searchLower)) ||
+          (m.firstName && m.firstName.toLowerCase().includes(searchLower)) ||
+          (m.lastName && m.lastName.toLowerCase().includes(searchLower)) ||
+          (m.email && m.email.toLowerCase().includes(searchLower)) ||
+          (m.phone && m.phone.toLowerCase().includes(searchLower)) ||
+          (m.itsNumber && m.itsNumber.toLowerCase().includes(searchLower)) ||
+          (m.role && m.role.toLowerCase().includes(searchLower)) ||
+          (m.title && m.title.toLowerCase().includes(searchLower))
+      )
+    : members;
 
   const fetchMembers = async () => {
     const headers = await getAuthHeaders();
@@ -214,8 +230,22 @@ export default function MembersPage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === members.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(members.map((m) => m.id)));
+    if (filteredMembers.length === 0) return;
+    const filteredIds = new Set(filteredMembers.map((m) => m.id));
+    const allFilteredSelected = filteredIds.size > 0 && [...filteredIds].every((id) => selectedIds.has(id));
+    if (allFilteredSelected) {
+      setSelectedIds((s) => {
+        const next = new Set(s);
+        filteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((s) => {
+        const next = new Set(s);
+        filteredIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
   };
 
   if (profile?.role === "member") {
@@ -375,15 +405,30 @@ export default function MembersPage() {
       {loading ? (
         <p className="text-stone-500">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800">
-          <table className="min-w-full divide-y divide-stone-200 dark:divide-stone-600">
+        <div className="space-y-4">
+          <div className="mb-4">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name, email, phone, ITS number, role..."
+              className="w-full max-w-md rounded-lg border border-stone-300 px-4 py-2.5 text-sm placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder:text-stone-500"
+            />
+            {searchQuery.trim() && (
+              <p className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">
+                Showing {filteredMembers.length} of {members.length} members
+              </p>
+            )}
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800">
+            <table className="min-w-full divide-y divide-stone-200 dark:divide-stone-600">
             <thead className="bg-stone-50 dark:bg-stone-700/50">
               <tr>
                 {canManage && (
                   <th className="whitespace-nowrap px-3 py-3 text-left">
                     <input
                       type="checkbox"
-                      checked={members.length > 0 && selectedIds.size === members.length}
+                      checked={filteredMembers.length > 0 && filteredMembers.every((m) => selectedIds.has(m.id))}
                       onChange={toggleSelectAll}
                       className="rounded border-stone-300"
                     />
@@ -400,7 +445,7 @@ export default function MembersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-600">
-              {members.map((m) => (
+              {filteredMembers.map((m) => (
                 <tr key={m.id} className="text-stone-700 dark:text-stone-300">
                   {canManage && (
                     <td className="whitespace-nowrap px-3 py-3">
@@ -503,7 +548,8 @@ export default function MembersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       )}
     </div>

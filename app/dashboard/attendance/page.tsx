@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import { getDatesInRange, today } from "@/lib/dates";
@@ -11,6 +12,7 @@ import type { Event } from "@/types";
 
 export default function AttendancePage() {
   const { profile } = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const urlEventId = searchParams.get("eventId") ?? "";
   const urlDate = searchParams.get("date") ?? "";
@@ -29,6 +31,7 @@ export default function AttendancePage() {
   const [notes, setNotes] = useState("");
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const isSuperAdmin = profile?.role === "super_admin";
   const isAdmin = profile?.role === "admin";
@@ -36,6 +39,8 @@ export default function AttendancePage() {
   const canManageAttendance = isSuperAdmin || isAdmin;
   const eventDates = selectedEvent ? getDatesInRange(selectedEvent.dateFrom, selectedEvent.dateTo) : [];
   const allowedDates = eventDates.filter((d) => d <= today());
+  const isDateAllowed = selectedDate <= today();
+  const eventNotStarted = selectedEvent != null && (selectedEvent.dateFrom?.slice(0, 10) ?? "") > today();
   const teamsInEvent =
     selectedEvent && teams.length > 0
       ? selectedEvent.teamIds.map((tid) => teams.find((t) => t.id === tid)).filter(Boolean) as Team[]
@@ -69,6 +74,10 @@ export default function AttendancePage() {
   }, [urlEventId, urlDate, canManageAttendance]);
 
   useEffect(() => {
+    if (selectedDate > today()) setSelectedDate(today());
+  }, [selectedDate]);
+
+  useEffect(() => {
     if (!selectedEventId || !canManageAttendance) {
       setSelectedEvent(null);
       return;
@@ -81,13 +90,15 @@ export default function AttendancePage() {
         if (d?.event?.dateFrom && d?.event?.dateTo) {
           const dates = getDatesInRange(d.event.dateFrom, d.event.dateTo).filter((x) => x <= today());
           setSelectedDate(dates.includes(today()) ? today() : dates[0] ?? today());
+        } else {
+          setSelectedDate(today());
         }
       })
       .catch(() => setSelectedEvent(null));
   }, [selectedEventId, canManageAttendance]);
 
   useEffect(() => {
-    if (!canManageAttendance || !selectedTeamId || !selectedDate) {
+    if (!canManageAttendance || !selectedTeamId || !selectedDate || selectedDate > today()) {
       setMembers([]);
       setRecord(null);
       setChoices([]);
@@ -134,6 +145,7 @@ export default function AttendancePage() {
     if (!selectedTeamId || !selectedDate || !profile) return;
     if (selectedDate > today()) return; // Block future dates
     setSubmitting(true);
+    setSaveMessage(null);
     try {
       const headers = await getAuthHeaders();
       const presentIds = choices.filter((c) => c.present).map((c) => c.id);
@@ -154,6 +166,20 @@ export default function AttendancePage() {
       });
       if (res.ok) {
         setRecord({ presentIds, absentIds, startTime: startTime.trim() || undefined, endTime: endTime.trim() || undefined, notes: notes.trim() || undefined });
+        setSaveMessage("Saved.");
+
+        // Reset back to default Attendance page (clears query params too)
+        setSelectedEventId("");
+        setSelectedTeamId("");
+        setSelectedDate(today());
+        setMembers([]);
+        setChoices([]);
+        setRecord(null);
+        setStartTime("");
+        setEndTime("");
+        setNotes("");
+        setSelectedEvent(null);
+        router.push("/dashboard/attendance");
       }
     } finally {
       setSubmitting(false);
@@ -186,6 +212,12 @@ export default function AttendancePage() {
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
 
+      {saveMessage && (
+        <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
+          {saveMessage}
+        </div>
+      )}
+
       <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
         <h2 className="mb-3 font-medium text-stone-900 dark:text-white">
           {isSuperAdmin ? "Manage attendance (by event or ad-hoc)" : "Mark attendance (your teams)"}
@@ -207,44 +239,61 @@ export default function AttendancePage() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
-            <select
-              value={selectedTeamId}
-              onChange={(e) => setSelectedTeamId(e.target.value)}
-              className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-            >
-              <option value="">Select team</option>
-              {teamsForDropdown.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date (today or past only)</label>
-            {selectedEventId && allowedDates.length > 0 ? (
-              <select
-                value={allowedDates.includes(selectedDate) ? selectedDate : allowedDates[0] ?? selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-              >
-                {allowedDates.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="date"
-                value={selectedDate}
-                max={today()}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-              />
-            )}
-          </div>
+          {!eventNotStarted && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
+                <select
+                  value={selectedTeamId}
+                  onChange={(e) => setSelectedTeamId(e.target.value)}
+                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                >
+                  <option value="">Select team</option>
+                  {teamsForDropdown.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date (today or past only)</label>
+                {selectedEventId && allowedDates.length > 0 ? (
+                  <select
+                    value={allowedDates.includes(selectedDate) ? selectedDate : allowedDates[0] ?? selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  >
+                    {allowedDates.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="date"
+                    value={selectedDate > today() ? today() : selectedDate}
+                    max={today()}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v <= today()) setSelectedDate(v);
+                    }}
+                    className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
-        {loadingRecord && <p className="text-sm text-stone-500">Loading members…</p>}
-        {!loadingRecord && selectedTeamId && selectedDate && (
+        {eventNotStarted && (
+          <p className="rounded bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            This event has not yet started. Attendance can be recorded once the event start date has been reached.
+          </p>
+        )}
+        {!eventNotStarted && selectedDate > today() && (
+          <p className="mt-3 rounded bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            Attendance can only be recorded for today or past dates. Please select a date on or before {today()}.
+          </p>
+        )}
+        {!eventNotStarted && loadingRecord && <p className="text-sm text-stone-500">Loading members…</p>}
+        {!eventNotStarted && !loadingRecord && selectedTeamId && selectedDate && isDateAllowed && (
           <>
             {members.length === 0 ? (
               <p className="text-sm text-stone-500">No members in this team.</p>

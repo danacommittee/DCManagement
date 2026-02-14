@@ -34,6 +34,9 @@ export async function GET(req: NextRequest) {
         submittedBy: x.submittedBy,
         presentIds: Array.isArray(x.presentIds) ? x.presentIds : [],
         absentIds: Array.isArray(x.absentIds) ? x.absentIds : [],
+        startTime: x.startTime,
+        endTime: x.endTime,
+        notes: x.notes,
       };
     });
     if (eventId) records = records.filter((r) => r.eventId === eventId);
@@ -70,6 +73,9 @@ export async function GET(req: NextRequest) {
     const report = records.map((r) => ({
       date: r.date,
       team: teamsMap[r.teamId] != null ? teamsMap[r.teamId] : r.teamId,
+      startTime: r.startTime ?? "",
+      endTime: r.endTime ?? "",
+      notes: r.notes ?? "",
       presentCount: r.presentIds.length,
       absentCount: r.absentIds.length,
       present: r.presentIds.map((id: string) => (membersMap[id] != null ? membersMap[id] : id)),
@@ -77,10 +83,10 @@ export async function GET(req: NextRequest) {
     }));
 
     if (format === "csv") {
-      const header = "Date,Team,Present Count,Absent Count,Present Names,Absent Names\n";
+      const header = "Date,Team,Start Time,End Time,Notes,Present Count,Absent Count,Present Names,Absent Names\n";
       const rows = report.map(
         (r) =>
-          `${r.date},${(r.team as string).replace(/,/g, ";")},${r.presentCount},${r.absentCount},"${(r.present as string[]).join("; ")}","${(r.absent as string[]).join("; ")}"`
+          `${r.date},${(r.team as string).replace(/,/g, ";")},${String(r.startTime).replace(/,/g, ";")},${String(r.endTime).replace(/,/g, ";")},"${String(r.notes).replace(/"/g, '""')}",${r.presentCount},${r.absentCount},"${(r.present as string[]).join("; ")}","${(r.absent as string[]).join("; ")}"`
       ).join("\n");
       return new NextResponse(header + rows, {
         headers: {

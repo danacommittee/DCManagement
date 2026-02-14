@@ -2,13 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { authAdmin, db } from "@/lib/firebase-admin";
 import twilio from "twilio";
 import { sendEmail, isEmailConfigured } from "@/lib/nodemailer";
-
-function toE164(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 10) return "+1" + digits;
-  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
-  return "+" + digits;
-}
+import { sendSmsGate, isSmsGateConfigured } from "@/lib/sms-gate";
+import { toE164 } from "@/lib/phone";
 
 function resolveBody(body: string, name: string, team: string): string {
   return body
@@ -35,6 +30,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const templateId = body.templateId;
+    const eventId = typeof body.eventId === "string" ? body.eventId.trim() : null;
     const audienceType = body.audienceType;
     const audienceId = body.audienceId;
     const channel = body.channel;
@@ -50,10 +46,27 @@ export async function POST(req: NextRequest) {
     } else if (audienceType === "sub_team" && audienceId) {
       const teamSnap = await db.collection("teams").doc(audienceId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
-      recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
       if (role === "admin") {
         const team = teamSnap.data();
         if (team?.leaderId !== myId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (eventId) {
+        const eventSnap = await db.collection("events").doc(eventId).get();
+        if (eventSnap.exists) {
+          const ev = eventSnap.data()!;
+          const teamIds = (ev.teamIds as string[]) || [];
+          if (teamIds.includes(audienceId)) {
+            const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
+            const override = overrides[audienceId];
+            recipientIds = Array.isArray(override?.memberIds) ? override.memberIds : (Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : []);
+          } else {
+            recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
+          }
+        } else {
+          recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
+        }
+      } else {
+        recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
       }
     } else if (audienceType === "individual" && audienceId) {
       recipientIds = [audienceId];
@@ -68,7 +81,11 @@ export async function POST(req: NextRequest) {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-    const canSendSmsOrWhatsApp = sid && authToken && fromNumber && (channel === "sms" || channel === "whatsapp");
+    const useSmsGateForSms = channel === "sms" && isSmsGateConfigured();
+    const useTwilioForSms = channel === "sms" && sid && authToken && fromNumber;
+    const useTwilioForWhatsApp = channel === "whatsapp" && sid && authToken && fromNumber;
+    const canSendSmsOrWhatsApp =
+      (channel === "sms" && (useSmsGateForSms || useTwilioForSms)) || useTwilioForWhatsApp;
 
     if (channel === "email" && !isEmailConfigured()) {
       return NextResponse.json({
@@ -99,6 +116,7 @@ export async function POST(req: NextRequest) {
 
     let sent = 0;
     let failed = 0;
+    let lastError: string | null = null;
 
     if (channel === "email" && isEmailConfigured()) {
       for (const memberId of recipientIds) {
@@ -120,7 +138,26 @@ export async function POST(req: NextRequest) {
           failed++;
         }
       }
-    } else if (canSendSmsOrWhatsApp) {
+    } else if (useSmsGateForSms) {
+      for (const memberId of recipientIds) {
+        const member = membersMap[memberId];
+        const e164 = member ? toE164(member.phone) : null;
+        if (!member || !e164) {
+          lastError = member ? "Phone could not be normalized to E.164 (need at least 10 digits)." : "Member not found.";
+          failed++;
+          continue;
+        }
+        const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
+        const text = resolveBody(templateBody, member.name, teamName);
+        const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
+        if (result.ok) sent++;
+        else {
+          lastError = result.error ?? "SMS Gate error";
+          console.error("SMS Gate send failed for", memberId, result.error);
+          failed++;
+        }
+      }
+    } else if (useTwilioForSms || useTwilioForWhatsApp) {
       const client = twilio(sid, authToken);
       const from = channel === "whatsapp" ? "whatsapp:" + fromNumber : fromNumber;
       for (const memberId of recipientIds) {
@@ -131,7 +168,12 @@ export async function POST(req: NextRequest) {
         }
         const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
         const text = resolveBody(templateBody, member.name, teamName);
-        const to = channel === "whatsapp" ? "whatsapp:" + toE164(member.phone) : toE164(member.phone);
+        const e164 = toE164(member.phone);
+        if (!e164) {
+          failed++;
+          continue;
+        }
+        const to = channel === "whatsapp" ? "whatsapp:" + e164 : e164;
         try {
           await client.messages.create({ body: text, from, to });
           sent++;
@@ -164,18 +206,24 @@ export async function POST(req: NextRequest) {
     }
 
     if (canSendSmsOrWhatsApp) {
+      const provider = useSmsGateForSms ? "SMS Gate" : "Twilio";
+      const failDetail = failed > 0 && lastError ? ` ${lastError}` : (failed > 0 ? ` ${failed} failed (missing phone or send error).` : "");
       return NextResponse.json({
         ok: true,
-        message: `Sent ${sent} message(s) via ${channel}.${failed > 0 ? ` ${failed} failed (missing phone or Twilio error).` : ""}`,
+        message: `Sent ${sent} message(s) via ${channel} (${provider}).${failed > 0 ? ` ${failed} failed.` : ""}${failDetail}`,
         recipientCount: recipientIds.length,
         sent,
         failed,
+        lastError: lastError ?? undefined,
       });
     }
 
+    const hint = channel === "sms"
+      ? "Set SMS_GATE_USERNAME and SMS_GATE_PASSWORD, or Twilio credentials, in .env.local."
+      : "Twilio credentials not set. Message logged only.";
     return NextResponse.json({
       ok: true,
-      message: "Twilio credentials not set. Message logged only.",
+      message: hint,
       recipientCount: recipientIds.length,
     });
   } catch (e) {

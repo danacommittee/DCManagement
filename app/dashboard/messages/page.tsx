@@ -14,8 +14,11 @@ export default function MessagesPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
+  const [eventId, setEventId] = useState("");
+  const [events, setEvents] = useState<{ id: string; name: string; teamIds?: string[] }[]>([]);
+  const [eventTeams, setEventTeams] = useState<{ id: string; name: string }[]>([]);
   const [audienceType, setAudienceType] = useState<"individual" | "sub_team" | "entire_team">("entire_team");
   const [audienceId, setAudienceId] = useState("");
   const [channel, setChannel] = useState<"whatsapp" | "sms" | "email">("email");
@@ -27,31 +30,53 @@ export default function MessagesPage() {
     }
     const run = async () => {
       const headers = await getAuthHeaders();
-      const [tRes, teamsRes, membersRes] = await Promise.all([
+      const [tRes, teamsRes, membersRes, eventsRes] = await Promise.all([
         fetch("/api/templates", { headers }),
         fetch("/api/teams", { headers }),
         fetch("/api/members", { headers }),
+        fetch("/api/events?limit=100", { headers }),
       ]);
       if (tRes.ok) {
         const d = await tRes.json();
-        setTemplates(d.templates);
+        setTemplates(d.templates ?? []);
       }
       if (teamsRes.ok) {
         const d = await teamsRes.json();
-        setTeams(d.teams);
+        setTeams(d.teams ?? []);
       }
       if (membersRes.ok) {
         const d = await membersRes.json();
-        setMembers(d.members);
+        setMembers(d.members ?? []);
+      }
+      if (eventsRes?.ok) {
+        const d = await eventsRes.json();
+        setEvents(d.events ?? []);
       }
       setLoading(false);
     };
     run();
   }, [profile?.role]);
 
+  useEffect(() => {
+    if (!eventId) {
+      setEventTeams([]);
+      setAudienceId("");
+      return;
+    }
+    getAuthHeaders()
+      .then((headers) => fetch(`/api/events/${eventId}`, { headers }))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => {
+        const teamsList = d?.event?.teams ?? [];
+        setEventTeams(teamsList.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })));
+        setAudienceId("");
+      })
+      .catch(() => setEventTeams([]));
+  }, [eventId]);
+
   const send = async () => {
     if (!templateId) return;
-    setMessage(null);
+    setError(null);
     setSending(true);
     try {
       const headers = await getAuthHeaders();
@@ -60,20 +85,19 @@ export default function MessagesPage() {
         headers,
         body: JSON.stringify({
           templateId,
+          eventId: eventId || undefined,
           audienceType,
           audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
           channel,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const count = data.recipientCount != null ? data.recipientCount : 0;
-        setMessage(data.message || `Message logged. ${count} recipients. (Twilio not configured – add credentials to enable sending.)`);
-      } else {
-        setMessage(data.error || "Failed to send");
+      if (!res.ok) {
+        setError(data.error || "Failed to send");
+        return;
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Failed");
+      setError(e instanceof Error ? e.message : "Failed to send");
     } finally {
       setSending(false);
     }
@@ -88,12 +112,11 @@ export default function MessagesPage() {
     );
   }
 
+  const teamsForPicker = audienceType === "sub_team" && eventId && eventTeams.length > 0 ? eventTeams : teams;
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Send Message</h1>
-      <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">
-        SMS and WhatsApp via Twilio. Email via Nodemailer (set SMTP_HOST, SMTP_USER, SMTP_PASS in .env.local for Gmail or any SMTP).
-      </p>
       {loading ? (
         <p className="text-stone-500">Loading...</p>
       ) : (
@@ -112,6 +135,19 @@ export default function MessagesPage() {
             </select>
           </div>
           <div>
+            <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Event (optional)</label>
+            <select
+              value={eventId}
+              onChange={(e) => setEventId(e.target.value)}
+              className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+            >
+              <option value="">No event (default teams)</option>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Audience</label>
             <select
               value={audienceType}
@@ -125,14 +161,16 @@ export default function MessagesPage() {
           </div>
           {audienceType === "sub_team" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Team</label>
+              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                Team {eventId ? "(event’s teams)" : "(default teams)"}
+              </label>
               <select
                 value={audienceId}
                 onChange={(e) => setAudienceId(e.target.value)}
                 className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               >
                 <option value="">Select team</option>
-                {teams.map((t) => (
+                {teamsForPicker.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
@@ -173,9 +211,9 @@ export default function MessagesPage() {
           >
             {sending ? "Sending..." : "Send"}
           </button>
-          {message && (
-            <p className="rounded bg-stone-100 p-2 text-sm text-stone-700 dark:bg-stone-700 dark:text-stone-300">
-              {message}
+          {error && (
+            <p className="rounded bg-red-50 p-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+              {error}
             </p>
           )}
         </div>

@@ -64,7 +64,20 @@ export async function GET(req: NextRequest) {
       if (myRole === "admin" && teamSnap.data()?.leaderId !== myId) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      const memberIds = (teamSnap.data()?.memberIds as string[]) || [];
+
+      // If this attendance request is for a specific event, use per-event overrides (if any).
+      let memberIds = (teamSnap.data()?.memberIds as string[]) || [];
+      if (eventId) {
+        const eventSnap = await db.collection("events").doc(eventId).get();
+        if (eventSnap.exists) {
+          const ev = eventSnap.data()!;
+          const override = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined)?.[teamId];
+          if (Array.isArray(override?.memberIds)) {
+            memberIds = override!.memberIds!;
+          }
+        }
+      }
+
       const membersSnap2 = await db.collection("members").get();
       const membersMap = new Map<string, string>();
       membersSnap2.docs.forEach((d) => {
@@ -143,7 +156,7 @@ export async function POST(req: NextRequest) {
     const teamSnap = await db.collection("teams").doc(teamId).get();
     if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
     const teamData = teamSnap.data();
-    const memberIds = (teamData?.memberIds as string[]) || [];
+    let memberIds = (teamData?.memberIds as string[]) || [];
 
     if (memberSelf) {
       if (myRole !== "member") return NextResponse.json({ error: "memberSelf only for members" }, { status: 403 });
@@ -172,6 +185,12 @@ export async function POST(req: NextRequest) {
         const fromStr = (ev.dateFrom as string).slice(0, 10);
         const toStr = (ev.dateTo as string).slice(0, 10);
         if (date < fromStr || date > toStr) return NextResponse.json({ error: "Date not in event range" }, { status: 403 });
+
+        // Apply per-event team overrides for membership (affects self-attendance + absent list).
+        const override = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined)?.[teamId];
+        if (Array.isArray(override?.memberIds)) {
+          memberIds = override!.memberIds!;
+        }
       }
 
       const existingQuery = db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date);

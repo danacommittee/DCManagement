@@ -21,7 +21,9 @@ export default function MessagesPage() {
   const [eventTeams, setEventTeams] = useState<{ id: string; name: string }[]>([]);
   const [audienceType, setAudienceType] = useState<"individual" | "sub_team" | "entire_team">("entire_team");
   const [audienceId, setAudienceId] = useState("");
-  const [channel, setChannel] = useState<"whatsapp" | "sms" | "email">("email");
+  const [channels, setChannels] = useState<("email" | "sms" | "whatsapp")[]>(["email"]);
+  const [recipients, setRecipients] = useState<{ id: string; name: string }[]>([]);
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
 
   useEffect(() => {
     if (profile?.role === "member") {
@@ -74,8 +76,32 @@ export default function MessagesPage() {
       .catch(() => setEventTeams([]));
   }, [eventId]);
 
+  const canFetchRecipients =
+    audienceType === "entire_team" ||
+    (audienceType === "sub_team" && !!audienceId) ||
+    (audienceType === "individual" && !!audienceId);
+
+  useEffect(() => {
+    if (!canFetchRecipients) {
+      setRecipients([]);
+      return;
+    }
+    setRecipientsLoading(true);
+    const params = new URLSearchParams({ audienceType, ...(audienceId ? { audienceId } : {}), ...(eventId ? { eventId } : {}) });
+    getAuthHeaders()
+      .then((headers) => fetch(`/api/messages/recipients?${params}`, { headers }))
+      .then((res) => (res.ok ? res.json() : { recipients: [] }))
+      .then((d) => setRecipients(Array.isArray(d.recipients) ? d.recipients : []))
+      .catch(() => setRecipients([]))
+      .finally(() => setRecipientsLoading(false));
+  }, [canFetchRecipients, audienceType, audienceId, eventId]);
+
+  const toggleChannel = (ch: "email" | "sms" | "whatsapp") => {
+    setChannels((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]));
+  };
+
   const send = async () => {
-    if (!templateId) return;
+    if (!templateId || channels.length === 0) return;
     setError(null);
     setSending(true);
     try {
@@ -88,7 +114,7 @@ export default function MessagesPage() {
           eventId: eventId || undefined,
           audienceType,
           audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
-          channel,
+          channels,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -192,21 +218,41 @@ export default function MessagesPage() {
             </div>
           )}
           <div>
-            <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Channel</label>
-            <select
-              value={channel}
-              onChange={(e) => setChannel(e.target.value as typeof channel)}
-              className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-            >
-              <option value="email">Email</option>
-              <option value="sms">SMS</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
+            <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">Channels (select one or more)</label>
+            <div className="flex flex-wrap gap-4">
+              {(["email", "sms", "whatsapp"] as const).map((ch) => (
+                <label key={ch} className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={channels.includes(ch)}
+                    onChange={() => toggleChannel(ch)}
+                    className="rounded border-stone-300"
+                  />
+                  <span className="text-sm capitalize text-stone-700 dark:text-stone-300">{ch === "whatsapp" ? "WhatsApp" : ch === "sms" ? "SMS" : "Email"}</span>
+                </label>
+              ))}
+            </div>
           </div>
+          {canFetchRecipients && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Recipients ({recipients.length})</label>
+              {recipientsLoading ? (
+                <p className="text-sm text-stone-500">Loading…</p>
+              ) : recipients.length === 0 ? (
+                <p className="text-sm text-stone-500">No recipients for this selection.</p>
+              ) : (
+                <ul className="max-h-48 list-inside list-disc overflow-y-auto rounded border border-stone-200 bg-stone-50/50 py-2 pl-4 pr-2 text-sm text-stone-700 dark:border-stone-600 dark:bg-stone-900/30 dark:text-stone-300">
+                  {recipients.map((r) => (
+                    <li key={r.id}>{r.name}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={send}
-            disabled={sending || !templateId}
+            disabled={sending || !templateId || channels.length === 0}
             className="w-full rounded-lg bg-amber-600 py-2.5 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
           >
             {sending ? "Sending..." : "Send"}

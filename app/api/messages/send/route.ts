@@ -33,10 +33,14 @@ export async function POST(req: NextRequest) {
     const eventId = typeof body.eventId === "string" ? body.eventId.trim() : null;
     const audienceType = body.audienceType;
     const audienceId = body.audienceId;
-    const channel = body.channel;
+    const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
+    const channels = rawChannels.filter((c): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
 
-    if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType) || !["whatsapp", "sms", "email"].includes(channel)) {
-      return NextResponse.json({ error: "Invalid templateId, audienceType, or channel" }, { status: 400 });
+    if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType)) {
+      return NextResponse.json({ error: "Invalid templateId or audienceType" }, { status: 400 });
+    }
+    if (channels.length === 0) {
+      return NextResponse.json({ error: "Select at least one channel (email, sms, or whatsapp)" }, { status: 400 });
     }
 
     let recipientIds: string[] = [];
@@ -81,19 +85,6 @@ export async function POST(req: NextRequest) {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-    const useSmsGateForSms = channel === "sms" && isSmsGateConfigured();
-    const useTwilioForSms = channel === "sms" && sid && authToken && fromNumber;
-    const useTwilioForWhatsApp = channel === "whatsapp" && sid && authToken && fromNumber;
-    const canSendSmsOrWhatsApp =
-      (channel === "sms" && (useSmsGateForSms || useTwilioForSms)) || useTwilioForWhatsApp;
-
-    if (channel === "email" && !isEmailConfigured()) {
-      return NextResponse.json({
-        ok: true,
-        message: "Email not configured. Add SMTP_HOST, SMTP_USER, SMTP_PASS to .env.local (e.g. Gmail).",
-        recipientCount: recipientIds.length,
-      });
-    }
 
     const membersSnap2 = await db.collection("members").get();
     const membersMap: Record<string, { name: string; phone: string; email: string; teamIds: string[] }> = {};
@@ -114,73 +105,76 @@ export async function POST(req: NextRequest) {
       teamsMap[d.id] = (d.data().name as string) || d.id;
     });
 
-    let sent = 0;
-    let failed = 0;
-    let lastError: string | null = null;
+    let totalSent = 0;
+    let totalFailed = 0;
+    const summaryParts: string[] = [];
 
-    if (channel === "email" && isEmailConfigured()) {
-      for (const memberId of recipientIds) {
-        const member = membersMap[memberId];
-        if (!member || !member.email) {
-          failed++;
-          continue;
-        }
-        const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-        const text = resolveBody(templateBody, member.name, teamName);
-        const result = await sendEmail({
-          to: member.email,
-          subject: templateName,
-          text,
-        });
-        if (result.ok) sent++;
-        else {
-          console.error("Email send failed for", memberId, result.error);
-          failed++;
-        }
+    for (const channel of channels) {
+      const useSmsGateForSms = channel === "sms" && isSmsGateConfigured();
+      const useTwilioForSms = channel === "sms" && sid && authToken && fromNumber;
+      const useTwilioForWhatsApp = channel === "whatsapp" && sid && authToken && fromNumber;
+      const canSendSmsOrWhatsApp = (channel === "sms" && (useSmsGateForSms || useTwilioForSms)) || useTwilioForWhatsApp;
+
+      if (channel === "email" && !isEmailConfigured()) {
+        summaryParts.push("Email: not configured");
+        continue;
       }
-    } else if (useSmsGateForSms) {
-      for (const memberId of recipientIds) {
-        const member = membersMap[memberId];
-        const e164 = member ? toE164(member.phone) : null;
-        if (!member || !e164) {
-          lastError = member ? "Phone could not be normalized to E.164 (need at least 10 digits)." : "Member not found.";
-          failed++;
-          continue;
-        }
-        const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-        const text = resolveBody(templateBody, member.name, teamName);
-        const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
-        if (result.ok) sent++;
-        else {
-          lastError = result.error ?? "SMS Gate error";
-          console.error("SMS Gate send failed for", memberId, result.error);
-          failed++;
-        }
+      if ((channel === "sms" || channel === "whatsapp") && !canSendSmsOrWhatsApp) {
+        summaryParts.push(`${channel}: not configured`);
+        continue;
       }
-    } else if (useTwilioForSms || useTwilioForWhatsApp) {
-      const client = twilio(sid, authToken);
-      const from = channel === "whatsapp" ? "whatsapp:" + fromNumber : fromNumber;
-      for (const memberId of recipientIds) {
-        const member = membersMap[memberId];
-        if (!member || !member.phone) {
-          failed++;
-          continue;
+
+      let sent = 0;
+      let failed = 0;
+      let lastError: string | null = null;
+
+      if (channel === "email" && isEmailConfigured()) {
+        for (const memberId of recipientIds) {
+          const member = membersMap[memberId];
+          if (!member || !member.email) { failed++; continue; }
+          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
+          const text = resolveBody(templateBody, member.name, teamName);
+          const result = await sendEmail({ to: member.email, subject: templateName, text });
+          if (result.ok) sent++; else { console.error("Email send failed for", memberId, result.error); failed++; }
         }
-        const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-        const text = resolveBody(templateBody, member.name, teamName);
-        const e164 = toE164(member.phone);
-        if (!e164) {
-          failed++;
-          continue;
+        totalSent += sent;
+        totalFailed += failed;
+        summaryParts.push(`Email: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}`);
+      } else if (channel === "sms" && useSmsGateForSms) {
+        for (const memberId of recipientIds) {
+          const member = membersMap[memberId];
+          const e164 = member ? toE164(member.phone) : null;
+          if (!member || !e164) { lastError = member ? "Phone invalid." : "Member not found."; failed++; continue; }
+          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
+          const text = resolveBody(templateBody, member.name, teamName);
+          const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
+          if (result.ok) sent++; else { lastError = result.error ?? "SMS error"; console.error("SMS Gate send failed for", memberId, result.error); failed++; }
         }
-        const to = channel === "whatsapp" ? "whatsapp:" + e164 : e164;
-        try {
-          await client.messages.create({ body: text, from, to });
-          sent++;
-        } catch (err) {
-          console.error("Twilio send failed for", memberId, err);
-          failed++;
+        totalSent += sent;
+        totalFailed += failed;
+        summaryParts.push(`SMS: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}${lastError ? ` (${lastError})` : ""});
+      } else if ((channel === "sms" && useTwilioForSms) || (channel === "whatsapp" && useTwilioForWhatsApp)) {
+        const client = twilio(sid, authToken);
+        const from = channel === "whatsapp" ? "whatsapp:" + fromNumber : fromNumber;
+        for (const memberId of recipientIds) {
+          const member = membersMap[memberId];
+          if (!member || !member.phone) { failed++; continue; }
+          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
+          const text = resolveBody(templateBody, member.name, teamName);
+          const e164 = toE164(member.phone);
+          if (!e164) { failed++; continue; }
+          const to = channel === "whatsapp" ? "whatsapp:" + e164 : e164;
+          try {
+            await client.messages.create({ body: text, from, to });
+            sent++;
+          } catch (err) {
+            console.error("Twilio send failed for", memberId, err);
+            failed++;
+          }
         }
+        totalSent += sent;
+        totalFailed += failed;
+        summaryParts.push(`${channel}: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}`);
       }
     }
 
@@ -189,42 +183,18 @@ export async function POST(req: NextRequest) {
       templateId,
       audienceType,
       audienceId: audienceId != null ? audienceId : null,
-      channel,
+      channels,
       recipientIds,
       sentAt: now,
       createdBy: myId,
     });
 
-    if (channel === "email") {
-      return NextResponse.json({
-        ok: true,
-        message: `Sent ${sent} email(s).${failed > 0 ? ` ${failed} failed (missing email or SMTP error).` : ""}`,
-        recipientCount: recipientIds.length,
-        sent,
-        failed,
-      });
-    }
-
-    if (canSendSmsOrWhatsApp) {
-      const provider = useSmsGateForSms ? "SMS Gate" : "Twilio";
-      const failDetail = failed > 0 && lastError ? ` ${lastError}` : (failed > 0 ? ` ${failed} failed (missing phone or send error).` : "");
-      return NextResponse.json({
-        ok: true,
-        message: `Sent ${sent} message(s) via ${channel} (${provider}).${failed > 0 ? ` ${failed} failed.` : ""}${failDetail}`,
-        recipientCount: recipientIds.length,
-        sent,
-        failed,
-        lastError: lastError ?? undefined,
-      });
-    }
-
-    const hint = channel === "sms"
-      ? "Set SMS_GATE_USERNAME and SMS_GATE_PASSWORD, or Twilio credentials, in .env.local."
-      : "Twilio credentials not set. Message logged only.";
     return NextResponse.json({
       ok: true,
-      message: hint,
+      message: summaryParts.length > 0 ? summaryParts.join(". ") : "No channels configured.",
       recipientCount: recipientIds.length,
+      sent: totalSent,
+      failed: totalFailed,
     });
   } catch (e) {
     console.error(e);

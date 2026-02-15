@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     const audienceType = body.audienceType;
     const audienceId = body.audienceId;
     const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
-    const channels = rawChannels.filter((c): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
+    const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
 
     if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType)) {
       return NextResponse.json({ error: "Invalid templateId or audienceType" }, { status: 400 });
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
         }
         totalSent += sent;
         totalFailed += failed;
-        summaryParts.push(`Email: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}`);
+        summaryParts.push("Email: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
       } else if (channel === "sms" && useSmsGateForSms) {
         for (const memberId of recipientIds) {
           const member = membersMap[memberId];
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
         }
         totalSent += sent;
         totalFailed += failed;
-        summaryParts.push(`SMS: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}${lastError ? ` (${lastError})` : ""});
+        summaryParts.push("SMS: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : "") + (lastError ? " (" + lastError + ")" : ""));
       } else if ((channel === "sms" && useTwilioForSms) || (channel === "whatsapp" && useTwilioForWhatsApp)) {
         const client = twilio(sid, authToken);
         const from = channel === "whatsapp" ? "whatsapp:" + fromNumber : fromNumber;
@@ -174,7 +174,8 @@ export async function POST(req: NextRequest) {
         }
         totalSent += sent;
         totalFailed += failed;
-        summaryParts.push(`${channel}: ${sent} sent${failed > 0 ? `, ${failed} failed` : ""}`);
+        const failSuffix = failed > 0 ? ", " + failed + " failed" : "";
+        summaryParts.push(channel + ": " + sent + " sent" + failSuffix);
       }
     }
 

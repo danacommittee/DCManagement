@@ -14,18 +14,38 @@ Scheduled messages allow you to send messages at a specific date and time in the
 
 ## Setup Options
 
-### Option 1: Vercel Cron Jobs (Recommended if on Pro Plan)
+### Option 1: Vercel Cron Jobs (Pro Plan Required)
 
 **Requirements:**
-- Vercel Pro plan or higher (Cron Jobs are not available on Free/Hobby plans)
-- `vercel.json` is already configured
+- **Vercel Pro plan or higher** (Cron Jobs on Hobby/Free plan are limited to **once per day**)
+- Cron expressions running more frequently than daily will **fail deployment** on Hobby plan
 
-**Steps:**
-1. Deploy to Vercel
-2. Go to your Vercel project settings
-3. Navigate to "Cron Jobs" section
-4. Verify the cron job is enabled (should show `/api/messages/process-scheduled` running every minute)
-5. If not enabled, you may need to upgrade to Pro plan
+**Limitations on Hobby (Free) Plan:**
+- ❌ Minimum interval: **Once per day** (not per minute)
+- ❌ Cron expressions like `* * * * *` (every minute) will **fail deployment**
+- ❌ Scheduling precision: Hourly (±59 min), not per-minute
+- ✅ Daily cron jobs work: `0 1 * * *` (once per day at 1 AM)
+
+**If you're on Hobby Plan:**
+- The `vercel.json` cron configuration has been removed to prevent deployment failures
+- Use **Option 2: External Cron Service** instead (recommended for free accounts)
+
+**Steps for Pro Plan:**
+1. Upgrade to Vercel Pro plan
+2. Add cron configuration back to `vercel.json`:
+   ```json
+   {
+     "crons": [
+       {
+         "path": "/api/messages/process-scheduled",
+         "schedule": "* * * * *"
+       }
+     ]
+   }
+   ```
+3. Deploy to Vercel
+4. Go to your Vercel project settings → "Cron Jobs" section
+5. Verify the cron job is enabled
 
 **Note:** Vercel Cron Jobs automatically send a special header, so no `CRON_SECRET` is required.
 

@@ -15,6 +15,7 @@ export default function MessagesPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{ message: string; sent: number; failed: number; recipientCount: number } | null>(null);
   const [templateId, setTemplateId] = useState("");
   const [eventId, setEventId] = useState("");
   const [events, setEvents] = useState<{ id: string; name: string; teamIds?: string[] }[]>([]);
@@ -98,11 +99,14 @@ export default function MessagesPage() {
 
   const toggleChannel = (ch: "email" | "sms" | "whatsapp") => {
     setChannels((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]));
+    setSuccess(null);
+    setError(null);
   };
 
   const send = async () => {
     if (!templateId || channels.length === 0) return;
     setError(null);
+    setSuccess(null);
     setSending(true);
     try {
       const headers = await getAuthHeaders();
@@ -119,11 +123,22 @@ export default function MessagesPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Failed to send");
+        const errorMsg = data.error || data.message || "Failed to send message";
+        setError(errorMsg);
         return;
       }
+      if (data.ok) {
+        setSuccess({
+          message: data.message || "Message sent successfully",
+          sent: data.sent || 0,
+          failed: data.failed || 0,
+          recipientCount: data.recipientCount || 0,
+        });
+      } else {
+        setError(data.message || "Failed to send message");
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send");
+      setError(e instanceof Error ? e.message : "Failed to send message");
     } finally {
       setSending(false);
     }
@@ -151,7 +166,11 @@ export default function MessagesPage() {
             <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Template</label>
             <select
               value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
+              onChange={(e) => {
+                setTemplateId(e.target.value);
+                setSuccess(null);
+                setError(null);
+              }}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
             >
               <option value="">Select template</option>
@@ -257,10 +276,22 @@ export default function MessagesPage() {
           >
             {sending ? "Sending..." : "Send"}
           </button>
+          {success && (
+            <div className="rounded-lg bg-green-50 p-3 text-sm dark:bg-green-900/20">
+              <p className="font-medium text-green-800 dark:text-green-200">✓ Message sent successfully!</p>
+              <p className="mt-1 text-green-700 dark:text-green-300">{success.message}</p>
+              <div className="mt-2 space-y-1 text-xs text-green-600 dark:text-green-400">
+                <p>Recipients: {success.recipientCount}</p>
+                <p>Sent: {success.sent}</p>
+                {success.failed > 0 && <p className="text-amber-600 dark:text-amber-400">Failed: {success.failed}</p>}
+              </div>
+            </div>
+          )}
           {error && (
-            <p className="rounded bg-red-50 p-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
-              {error}
-            </p>
+            <div className="rounded-lg bg-red-50 p-3 text-sm dark:bg-red-900/20">
+              <p className="font-medium text-red-800 dark:text-red-200">✗ Failed to send message</p>
+              <p className="mt-1 text-red-700 dark:text-red-300">{error}</p>
+            </div>
           )}
         </div>
       )}

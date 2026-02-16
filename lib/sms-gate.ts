@@ -30,8 +30,15 @@ export interface SmsGateSendResult {
 export async function sendSmsGate(options: SmsGateSendOptions): Promise<SmsGateSendResult> {
   const username = process.env.SMS_GATE_USERNAME;
   const password = process.env.SMS_GATE_PASSWORD;
+  
+  // Better error message for missing credentials
   if (!username || !password) {
-    return { ok: false, error: "SMS Gate credentials not configured" };
+    const missing = [];
+    if (!username) missing.push("SMS_GATE_USERNAME");
+    if (!password) missing.push("SMS_GATE_PASSWORD");
+    const errorMsg = `SMS Gate credentials not configured. Missing: ${missing.join(", ")}. Please check your environment variables.`;
+    console.error("[SMS Gate]", errorMsg);
+    return { ok: false, error: errorMsg };
   }
 
   const normalized = options.phoneNumbers.map((p) => toE164(p)).filter((n): n is string => n != null);
@@ -58,11 +65,18 @@ export async function sendSmsGate(options: SmsGateSendOptions): Promise<SmsGateS
 
     if (!res.ok) {
       const text = await res.text();
-      return { ok: false, error: `SMS Gate API ${res.status}: ${text}` };
+      const errorMsg = `SMS Gate API error (${res.status}): ${text || "Unknown error"}`;
+      console.error("[SMS Gate]", errorMsg, { status: res.status, statusText: res.statusText });
+      return { ok: false, error: errorMsg };
     }
+    
+    const responseText = await res.text();
+    console.log("[SMS Gate] Success:", { phoneCount: normalized.length, response: responseText || "OK" });
     return { ok: true };
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: err };
+    const errorMsg = `SMS Gate network error: ${err}`;
+    console.error("[SMS Gate]", errorMsg, e);
+    return { ok: false, error: errorMsg };
   }
 }

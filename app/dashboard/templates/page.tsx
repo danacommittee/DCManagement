@@ -125,7 +125,7 @@ export default function TemplatesPage() {
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Templates</h1>
       <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">
         Use placeholders like {"{{Name}}"}, {"{{Team}}"}, {"{{YourName}}"}, {"{{EventName}}"}, {"{{TeamMembers}}"},{" "}
-        {"{{TeamLeaders}}"} in the body. They will be replaced when sending.
+        {"{{TeamLeaders}}"}, and {"{{TeamsList}}"} (each team + members, for people in multiple teams) in the body.
       </p>
       {canEdit && (
         <div className="mb-6">
@@ -137,20 +137,36 @@ export default function TemplatesPage() {
             {showForm ? "Cancel" : "Add template"}
           </button>
           {canEdit && !showForm && (
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(true);
-                setName("Event welcome message");
-                setCategory("special_event");
-                setBody(
-                  "Dear {{Name}},\n\nWelcome to {{EventName}}.\n\nYou are in team {{TeamName}}.\nYour team members: {{TeamMembers}}.\nYour team leader(s): {{TeamLeaders}}.\n\nWarm regards,\n{{YourName}}"
-                );
-              }}
-              className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
-            >
-              Quick create event welcome template
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(true);
+                  setName("Event welcome message");
+                  setCategory("special_event");
+                  setBody(
+                    "Dear {{Name}},\n\nWelcome to {{EventName}}.\n\nYou are in team {{TeamName}}.\nYour team members: {{TeamMembers}}.\nYour team leader(s): {{TeamLeaders}}.\n\nWarm regards,\n{{YourName}}"
+                  );
+                }}
+                className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
+              >
+                Quick create event welcome template
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(true);
+                  setName("Reminder – all my teams");
+                  setCategory("custom");
+                  setBody(
+                    "Hi {{Name}},\n\nReminder for {{EventName}}.\n\nYou are in the following teams and members:\n\n{{TeamsList}}\n\nIf you have questions, contact {{YourName}}."
+                  );
+                }}
+                className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
+              >
+                Quick create multi-team reminder
+              </button>
+            </>
           )}
           {showForm && (
             <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
@@ -188,6 +204,7 @@ export default function TemplatesPage() {
                   { label: "Event name", value: "{{EventName}}" },
                   { label: "Team members", value: "{{TeamMembers}}" },
                   { label: "Team leaders", value: "{{TeamLeaders}}" },
+                  { label: "All teams + members", value: "{{TeamsList}}" },
                 ].map((k) => (
                   <button
                     key={k.value}
@@ -242,6 +259,7 @@ export default function TemplatesPage() {
                       { label: "Event name", value: "{{EventName}}" },
                       { label: "Team members", value: "{{TeamMembers}}" },
                       { label: "Team leaders", value: "{{TeamLeaders}}" },
+                      { label: "All teams + members", value: "{{TeamsList}}" },
                     ].map((k) => (
                       <button
                         key={k.value}

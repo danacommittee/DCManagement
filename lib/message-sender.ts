@@ -15,7 +15,8 @@ function resolveBody(
   eventName: string,
   teamMembers: string,
   teamLeaders: string,
-  inlineImageMap?: Record<string, string>
+  inlineImageMap?: Record<string, string>,
+  teamsList?: string
 ): string {
   let result = body
     .replace(/\{\{Name\}\}|\{\{name\}\}/g, name)
@@ -23,7 +24,8 @@ function resolveBody(
     .replace(/\{\{YourName\}\}|\{\{your name\}\}/gi, senderName)
     .replace(/\{\{EventName\}\}|\{\{event name\}\}/gi, eventName)
     .replace(/\{\{TeamMembers\}\}|\{\{team members\}\}/gi, teamMembers)
-    .replace(/\{\{TeamLeaders\}\}|\{\{team leaders\}\}/gi, teamLeaders);
+    .replace(/\{\{TeamLeaders\}\}|\{\{team leaders\}\}/gi, teamLeaders)
+    .replace(/\{\{TeamsList\}\}|\{\{teams list\}\}|\{\{AllTeamsWithMembers\}\}/gi, teamsList ?? "");
   
   // Replace inline image placeholders: {{InlineImage:key}} -> <img src="cid:key" />
   if (inlineImageMap) {
@@ -133,13 +135,27 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
   const templateName = (templateData?.name as string) || "Message";
   const templateAttachments = (templateData?.attachments as TemplateAttachment[] | undefined) || [];
 
-  // Get recipients
+  // Get recipients and team context (all teams per member so one message can list every team they're in)
   let recipientIds: string[] = [];
   let eventName = "";
-  const memberEventTeam: Record<string, string> = {};
-  const eventTeamMeta: Record<string, { name: string; memberIds: string[]; leaderIds: string[] }> = {};
+  const memberEventTeams: Record<string, string[]> = {};
+  const teamMeta: Record<string, { name: string; memberIds: string[]; leaderIds: string[] }> = {};
 
   if (audienceType === "entire_team") {
+    const teamsSnap = await db.collection("teams").get();
+    const teamsMap = new Map<string, { name: string; memberIds: string[]; leaderIds: string[] }>();
+    teamsSnap.docs.forEach((d) => {
+      const x = d.data();
+      teamsMap.set(d.id, {
+        name: (x.name as string) || d.id,
+        memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
+        leaderIds: [
+          ...(x.leaderId ? [String(x.leaderId)] : []),
+          ...(x.leader2Id ? [String(x.leader2Id)] : []),
+        ],
+      });
+    });
+
     if (eventId) {
       const eventSnap = await db.collection("events").doc(eventId).get();
       if (!eventSnap.exists) {
@@ -148,21 +164,6 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       const ev = eventSnap.data()!;
       eventName = typeof ev.name === "string" ? ev.name : "";
       const teamIds = (ev.teamIds as string[]) || [];
-
-      const teamsSnap = await db.collection("teams").get();
-      const teamsMap = new Map<string, { name: string; memberIds: string[]; leaderIds: string[] }>();
-      teamsSnap.docs.forEach((d) => {
-        const x = d.data();
-        teamsMap.set(d.id, {
-          name: (x.name as string) || d.id,
-          memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
-          leaderIds: [
-            ...(x.leaderId ? [String(x.leaderId)] : []),
-            ...(x.leader2Id ? [String(x.leader2Id)] : []),
-          ],
-        });
-      });
-
       const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
       const idSet = new Set<string>();
       for (const tid of teamIds) {
@@ -170,22 +171,32 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         if (!base) continue;
         const override = overrides[tid];
         const effectiveMembers = Array.isArray(override?.memberIds) ? override!.memberIds! : base.memberIds;
-        eventTeamMeta[tid] = {
+        teamMeta[tid] = {
           name: base.name,
           memberIds: effectiveMembers,
           leaderIds: base.leaderIds,
         };
         for (const mid of effectiveMembers) {
           idSet.add(mid);
-          if (!memberEventTeam[mid]) {
-            memberEventTeam[mid] = tid;
-          }
+          if (!memberEventTeams[mid]) memberEventTeams[mid] = [];
+          if (!memberEventTeams[mid].includes(tid)) memberEventTeams[mid].push(tid);
         }
       }
       recipientIds = Array.from(idSet);
     } else {
       const membersSnap2 = await db.collection("members").get();
       recipientIds = membersSnap2.docs.map((d) => d.id);
+      for (const d of teamsSnap.docs) {
+        const tid = d.id;
+        const base = teamsMap.get(tid)!;
+        teamMeta[tid] = { name: base.name, memberIds: base.memberIds, leaderIds: base.leaderIds };
+      }
+      for (const memberId of recipientIds) {
+        const doc = membersSnap2.docs.find((x) => x.id === memberId);
+        const teamIds = Array.isArray(doc?.data()?.teamIds) ? (doc!.data()!.teamIds as string[]) : [];
+        const validTeamIds = teamIds.filter((tid) => teamsMap.has(tid));
+        if (validTeamIds.length > 0) memberEventTeams[memberId] = validTeamIds;
+      }
     }
   } else if (audienceType === "sub_team" && audienceId) {
     const teamSnap = await db.collection("teams").doc(audienceId).get();
@@ -193,7 +204,12 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       return { ok: false, sent: 0, failed: 0, recipientCount: 0, error: "Team not found" };
     }
     const team = teamSnap.data()!;
-    recipientIds = Array.isArray(team.memberIds) ? (team.memberIds as string[]) : [];
+    const baseMemberIds = Array.isArray(team.memberIds) ? (team.memberIds as string[]) : [];
+    const leaderIds = [
+      ...(team.leaderId ? [String(team.leaderId)] : []),
+      ...(team.leader2Id ? [String(team.leader2Id)] : []),
+    ];
+    let effectiveMembers = baseMemberIds;
     if (eventId) {
       const eventSnap = await db.collection("events").doc(eventId).get();
       if (eventSnap.exists) {
@@ -201,9 +217,18 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         eventName = typeof ev.name === "string" ? ev.name : "";
         const override = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined)?.[audienceId];
         if (Array.isArray(override?.memberIds)) {
-          recipientIds = override!.memberIds!;
+          effectiveMembers = override!.memberIds!;
         }
       }
+    }
+    recipientIds = effectiveMembers;
+    teamMeta[audienceId] = {
+      name: (team.name as string) || audienceId,
+      memberIds: effectiveMembers,
+      leaderIds,
+    };
+    for (const mid of effectiveMembers) {
+      memberEventTeams[mid] = [audienceId];
     }
   } else if (audienceType === "individual" && audienceId) {
     recipientIds = [audienceId];
@@ -246,23 +271,40 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         teamName: "",
         teamMembersList: "",
         teamLeadersList: "",
+        teamsListFormatted: "",
       };
     }
-    const eventTeamId = memberEventTeam[memberId];
-    if (eventTeamId && eventTeamMeta[eventTeamId]) {
-      const meta = eventTeamMeta[eventTeamId];
-      const teamMembersList = meta.memberIds
-        .map((mid) => (membersMap[mid]?.name != null ? membersMap[mid].name : mid))
-        .join(", ");
-      const teamLeadersList = meta.leaderIds
-        .map((lid) => (membersMap[lid]?.name != null ? membersMap[lid].name : lid))
-        .filter(Boolean)
-        .join(", ");
+    const teamIds = memberEventTeams[memberId];
+    if (teamIds?.length > 0 && Object.keys(teamMeta).length > 0) {
+      const parts: string[] = [];
+      let firstTeamName = "";
+      let firstTeamMembersList = "";
+      let firstTeamLeadersList = "";
+      for (const tid of teamIds) {
+        const meta = teamMeta[tid];
+        if (!meta) continue;
+        const teamMembersList = meta.memberIds
+          .map((mid) => (membersMap[mid]?.name != null ? membersMap[mid].name : mid))
+          .join(", ");
+        const teamLeadersList = meta.leaderIds
+          .map((lid) => (membersMap[lid]?.name != null ? membersMap[lid].name : lid))
+          .filter(Boolean)
+          .join(", ");
+        const leaderLine = teamLeadersList ? `\nLeads: ${teamLeadersList}` : "";
+        parts.push(`${meta.name}: ${teamMembersList}${leaderLine}`);
+        if (!firstTeamName) {
+          firstTeamName = meta.name;
+          firstTeamMembersList = teamMembersList;
+          firstTeamLeadersList = teamLeadersList;
+        }
+      }
+      const teamsListFormatted = parts.join("\n\n");
       return {
         member,
-        teamName: meta.name,
-        teamMembersList,
-        teamLeadersList,
+        teamName: teamIds.length > 1 ? teamIds.map((tid) => teamMeta[tid]?.name ?? tid).join(", ") : firstTeamName,
+        teamMembersList: firstTeamMembersList,
+        teamLeadersList: firstTeamLeadersList,
+        teamsListFormatted,
       };
     }
     const fallbackTeamName =
@@ -272,6 +314,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       teamName: fallbackTeamName,
       teamMembersList: "",
       teamLeadersList: "",
+      teamsListFormatted: "",
     };
   };
 
@@ -298,10 +341,10 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       }
 
       for (const memberId of recipientIds) {
-        const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
+        const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         if (!member || !member.email) { failed++; continue; }
         
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, inlineImageMap);
+        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, inlineImageMap, teamsListFormatted);
         const html = text.replace(/\n/g, "<br>");
         
         const result = await sendEmail({
@@ -320,10 +363,10 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
     } else if (channel === "sms" && (isSmsGateConfigured() || (sid && authToken && fromNumber))) {
       let lastError: string | null = null;
       for (const memberId of recipientIds) {
-        const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
+        const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
         if (!member || !e164) { lastError = member ? "Phone invalid." : "Member not found."; failed++; continue; }
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList);
+        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, undefined, teamsListFormatted);
         
         if (isSmsGateConfigured()) {
           const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
@@ -352,10 +395,10 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       summaryParts.push("SMS: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : "") + (lastError ? " (" + lastError + ")" : ""));
     } else if (channel === "whatsapp" && sid && authToken && fromNumber) {
       for (const memberId of recipientIds) {
-        const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
+        const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
         if (!member || !e164) { failed++; continue; }
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList);
+        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, undefined, teamsListFormatted);
         const client = twilio(sid, authToken);
         try {
           await client.messages.create({ body: text, from: `whatsapp:${fromNumber}`, to: `whatsapp:${e164}` });

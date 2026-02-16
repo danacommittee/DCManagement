@@ -8,6 +8,16 @@ import type { Team } from "@/types";
 import type { Member } from "@/types";
 import type { ScheduledMessage } from "@/types";
 
+/** Format date for datetime-local input in the user's local time (avoids Android hour reverting when using UTC). */
+function toLocalDatetimeLocalString(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${mo}-${day}T${h}:${min}`;
+}
+
 export default function MessagesPage() {
   const { profile } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -383,7 +393,14 @@ export default function MessagesPage() {
             </button>
             <button
               type="button"
-              onClick={() => setShowScheduleForm(!showScheduleForm)}
+              onClick={() => {
+                const next = !showScheduleForm;
+                setShowScheduleForm(next);
+                if (next) {
+                  const inOneHour = new Date(Date.now() + 60 * 60 * 1000);
+                  setScheduleDateTime(toLocalDatetimeLocalString(inOneHour));
+                }
+              }}
               disabled={sending || scheduling || !templateId || channels.length === 0}
               className="flex-1 rounded-lg border-2 border-amber-600 bg-white py-2.5 font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-500 dark:bg-stone-800 dark:text-amber-400 dark:hover:bg-stone-700"
             >
@@ -399,7 +416,7 @@ export default function MessagesPage() {
                 type="datetime-local"
                 value={scheduleDateTime}
                 onChange={(e) => setScheduleDateTime(e.target.value)}
-                min={new Date().toISOString().slice(0, 16)}
+                min={toLocalDatetimeLocalString(new Date())}
                 className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
               <div className="flex gap-2">
@@ -533,7 +550,7 @@ export default function MessagesPage() {
                               type="button"
                               onClick={() => {
                                 setEditingScheduledId(msg.id);
-                                setEditScheduleDateTime(new Date(msg.scheduledAt).toISOString().slice(0, 16));
+                                setEditScheduleDateTime(toLocalDatetimeLocalString(new Date(msg.scheduledAt)));
                               }}
                               className="rounded border border-stone-300 px-3 py-1.5 text-xs text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
                             >
@@ -584,7 +601,7 @@ export default function MessagesPage() {
                           type="datetime-local"
                           value={editScheduleDateTime}
                           onChange={(e) => setEditScheduleDateTime(e.target.value)}
-                          min={new Date().toISOString().slice(0, 16)}
+                          min={toLocalDatetimeLocalString(new Date())}
                           className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                         />
                         <div className="flex gap-2">

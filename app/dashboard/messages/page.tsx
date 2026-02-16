@@ -6,6 +6,7 @@ import { getAuthHeaders } from "@/lib/api";
 import type { Template } from "@/types";
 import type { Team } from "@/types";
 import type { Member } from "@/types";
+import type { ScheduledMessage } from "@/types";
 
 export default function MessagesPage() {
   const { profile } = useAuth();
@@ -28,6 +29,26 @@ export default function MessagesPage() {
   const [channels, setChannels] = useState<("email" | "sms" | "whatsapp")[]>(["email"]);
   const [recipients, setRecipients] = useState<{ id: string; name: string }[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(false);
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
+  const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
+  const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
+  const [editScheduleDateTime, setEditScheduleDateTime] = useState("");
+
+  const fetchScheduledMessages = async () => {
+    setScheduledMessagesLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/messages/schedule", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setScheduledMessages(data.scheduledMessages || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch scheduled messages:", e);
+    } finally {
+      setScheduledMessagesLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (profile?.role === "member") {
@@ -61,6 +82,7 @@ export default function MessagesPage() {
       setLoading(false);
     };
     run();
+    fetchScheduledMessages();
   }, [profile?.role]);
 
   useEffect(() => {
@@ -215,6 +237,7 @@ export default function MessagesPage() {
         });
         setShowScheduleForm(false);
         setScheduleDateTime("");
+        await fetchScheduledMessages(); // Refresh scheduled messages list
       } else {
         setError(data.message || "Failed to schedule message");
       }
@@ -424,6 +447,201 @@ export default function MessagesPage() {
             <div className="rounded-lg bg-red-50 p-3 text-sm dark:bg-red-900/20">
               <p className="font-medium text-red-800 dark:text-red-200">✗ Failed to send message</p>
               <p className="mt-1 text-red-700 dark:text-red-300">{error}</p>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Scheduled Messages Section */}
+      {!loading && (
+        <div className="mt-8 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-stone-900 dark:text-white">Scheduled Messages</h2>
+            <button
+              type="button"
+              onClick={fetchScheduledMessages}
+              disabled={scheduledMessagesLoading}
+              className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+            >
+              {scheduledMessagesLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+          
+          {scheduledMessagesLoading ? (
+            <p className="text-stone-500">Loading scheduled messages...</p>
+          ) : scheduledMessages.length === 0 ? (
+            <p className="text-stone-500">No scheduled messages</p>
+          ) : (
+            <div className="space-y-3">
+              {scheduledMessages.map((msg) => {
+                const template = templates.find((t) => t.id === msg.templateId);
+                const scheduledDate = new Date(msg.scheduledAt);
+                const isPast = scheduledDate.getTime() <= Date.now();
+                const statusColors = {
+                  pending: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+                  sending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
+                  sent: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+                  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+                };
+                
+                return (
+                  <div
+                    key={msg.id}
+                    className="rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-600 dark:bg-stone-900/30"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="font-medium text-stone-900 dark:text-white">
+                            {template?.name || "Unknown Template"}
+                          </span>
+                          <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColors[msg.status] || statusColors.pending}`}>
+                            {msg.status.charAt(0).toUpperCase() + msg.status.slice(1)}
+                          </span>
+                          {isPast && msg.status === "pending" && (
+                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                              Overdue
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-1 text-sm text-stone-600 dark:text-stone-400">
+                          <p>
+                            <span className="font-medium">Scheduled:</span> {scheduledDate.toLocaleString()}
+                          </p>
+                          <p>
+                            <span className="font-medium">Channels:</span> {msg.channels.map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ")}
+                          </p>
+                          <p>
+                            <span className="font-medium">Audience:</span> {msg.audienceType === "entire_team" ? "Entire Team" : msg.audienceType === "sub_team" ? "Sub-team" : "Individual"}
+                          </p>
+                          {msg.error && (
+                            <p className="text-red-600 dark:text-red-400">
+                              <span className="font-medium">Error:</span> {msg.error}
+                            </p>
+                          )}
+                          {msg.sentAt && (
+                            <p>
+                              <span className="font-medium">Sent at:</span> {new Date(msg.sentAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="ml-4 flex gap-2">
+                        {msg.status === "pending" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingScheduledId(msg.id);
+                                setEditScheduleDateTime(new Date(msg.scheduledAt).toISOString().slice(0, 16));
+                              }}
+                              className="rounded border border-stone-300 px-3 py-1.5 text-xs text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!confirm("Delete this scheduled message?")) return;
+                                try {
+                                  const headers = await getAuthHeaders();
+                                  const res = await fetch(`/api/messages/schedule/${msg.id}`, {
+                                    method: "DELETE",
+                                    headers,
+                                  });
+                                  if (res.ok) {
+                                    await fetchScheduledMessages();
+                                    setSuccess({
+                                      message: "Scheduled message deleted",
+                                      sent: 0,
+                                      failed: 0,
+                                      recipientCount: 0,
+                                    });
+                                  } else {
+                                    const data = await res.json().catch(() => ({}));
+                                    setError(data.error || "Failed to delete scheduled message");
+                                  }
+                                } catch (e) {
+                                  setError("Failed to delete scheduled message");
+                                }
+                              }}
+                              className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/20"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Edit form */}
+                    {editingScheduledId === msg.id && (
+                      <div className="mt-4 rounded border border-stone-200 bg-white p-3 dark:border-stone-600 dark:bg-stone-800">
+                        <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                          New Scheduled Date & Time
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={editScheduleDateTime}
+                          onChange={(e) => setEditScheduleDateTime(e.target.value)}
+                          min={new Date().toISOString().slice(0, 16)}
+                          className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!editScheduleDateTime) return;
+                              const newTimestamp = new Date(editScheduleDateTime).getTime();
+                              if (newTimestamp <= Date.now()) {
+                                setError("Scheduled time must be in the future");
+                                return;
+                              }
+                              try {
+                                const headers = await getAuthHeaders();
+                                const res = await fetch(`/api/messages/schedule/${msg.id}`, {
+                                  method: "PATCH",
+                                  headers,
+                                  body: JSON.stringify({ scheduledAt: newTimestamp }),
+                                });
+                                if (res.ok) {
+                                  setEditingScheduledId(null);
+                                  setEditScheduleDateTime("");
+                                  await fetchScheduledMessages();
+                                  setSuccess({
+                                    message: "Scheduled message updated",
+                                    sent: 0,
+                                    failed: 0,
+                                    recipientCount: 0,
+                                  });
+                                } else {
+                                  const data = await res.json().catch(() => ({}));
+                                  setError(data.error || "Failed to update scheduled message");
+                                }
+                              } catch (e) {
+                                setError("Failed to update scheduled message");
+                              }
+                            }}
+                            className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingScheduledId(null);
+                              setEditScheduleDateTime("");
+                            }}
+                            className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

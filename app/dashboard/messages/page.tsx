@@ -169,12 +169,9 @@ export default function MessagesPage() {
     const eventName = selectedEvent?.name ?? "";
     const teamName = selectedTeam?.name ?? (audienceType === "entire_team" ? "All teams" : "");
     const senderName =
-      (profile?.name != null && String(profile.name).trim()) ||
-      [profile?.title, profile?.firstName, profile?.lastName].filter(Boolean).join(" ") ||
-      profile?.email ||
-      "";
+      (profile?.name != null && String(profile.name).trim()) || profile?.email || "";
     setPreviewBody(resolvePreviewBody(selectedTemplate.body, { eventName, teamName, senderName }));
-  }, [selectedTemplate?.id, selectedTemplate?.body, selectedEvent?.name, audienceType, selectedTeam?.name, profile?.name, profile?.title, profile?.firstName, profile?.lastName, profile?.email]);
+  }, [selectedTemplate?.id, selectedTemplate?.body, selectedEvent?.name, audienceType, selectedTeam?.name, profile?.name, profile?.email]);
 
   const toggleChannel = (ch: "email" | "sms" | "whatsapp") => {
     if (ch === "whatsapp") return; // WhatsApp disabled for now

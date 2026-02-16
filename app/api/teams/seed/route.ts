@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
       await db.collection("teams").add({
         name,
         leaderId: null,
+        leader2Id: null,
         memberIds: [],
         createdAt: now,
         updatedAt: now,
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
       await db.collection("teams").add({
         name,
         leaderId: null,
+        leader2Id: null,
         memberIds: [],
         dayOfWeek,
         isWrapUp: true,

@@ -42,15 +42,25 @@ export async function GET(req: NextRequest) {
 
     if (myRole === "admin") {
       const teamsSnap = await db.collection("teams").get();
-      const leaderTeamIds = new Set(teamsSnap.docs.filter((d) => d.data().leaderId === myId).map((d) => d.id));
+      const leaderTeamIds = new Set(
+        teamsSnap.docs
+          .filter((d) => {
+            const t = d.data();
+            return t.leaderId === myId || t.leader2Id === myId;
+          })
+          .map((d) => d.id)
+      );
       records = records.filter((r) => leaderTeamIds.has(r.teamId));
     }
 
     if (teamId) {
       const teamSnap = await db.collection("teams").doc(teamId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
-      if (myRole === "admin" && teamSnap.data()?.leaderId !== myId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (myRole === "admin") {
+        const t = teamSnap.data();
+        if (t?.leaderId !== myId && t?.leader2Id !== myId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
       records = records.filter((r) => r.teamId === teamId);
     }
@@ -61,8 +71,11 @@ export async function GET(req: NextRequest) {
     if (expandMembers && teamId) {
       const teamSnap = await db.collection("teams").doc(teamId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
-      if (myRole === "admin" && teamSnap.data()?.leaderId !== myId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (myRole === "admin") {
+        const t = teamSnap.data();
+        if (t?.leaderId !== myId && t?.leader2Id !== myId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
 
       // If this attendance request is for a specific event, use per-event overrides (if any).
@@ -230,7 +243,10 @@ export async function POST(req: NextRequest) {
 
     if (myRole === "super_admin") {
       // super_admin can submit for any team/date
-    } else if (myRole === "admin" && teamData?.leaderId === myId) {
+    } else if (
+      myRole === "admin" &&
+      (teamData?.leaderId === myId || teamData?.leader2Id === myId)
+    ) {
       // admin can submit for teams they lead
     } else {
       return NextResponse.json({ error: "Only team leader or super admin can submit full attendance" }, { status: 403 });

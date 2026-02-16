@@ -32,14 +32,48 @@ export async function GET(req: NextRequest) {
 
     let recipientIds: string[] = [];
     if (audienceType === "entire_team") {
-      const membersSnap2 = await db.collection("members").get();
-      recipientIds = membersSnap2.docs.map((d) => d.id);
+      if (eventId) {
+        const eventSnap = await db.collection("events").doc(eventId).get();
+        if (!eventSnap.exists) {
+          return NextResponse.json({ error: "Event not found" }, { status: 400 });
+        }
+        const ev = eventSnap.data()!;
+        const teamIds = (ev.teamIds as string[]) || [];
+
+        const teamsSnap = await db.collection("teams").get();
+        const teamsMap = new Map<string, { memberIds: string[] }>();
+        teamsSnap.docs.forEach((d) => {
+          const x = d.data();
+          teamsMap.set(
+            d.id,
+            {
+              memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
+            }
+          );
+        });
+
+        const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
+        const idSet = new Set<string>();
+        for (const tid of teamIds) {
+          const base = teamsMap.get(tid);
+          if (!base) continue;
+          const override = overrides[tid];
+          const effectiveMembers = Array.isArray(override?.memberIds) ? override!.memberIds! : base.memberIds;
+          for (const mid of effectiveMembers) idSet.add(mid);
+        }
+        recipientIds = Array.from(idSet);
+      } else {
+        const membersSnap2 = await db.collection("members").get();
+        recipientIds = membersSnap2.docs.map((d) => d.id);
+      }
     } else if (audienceType === "sub_team" && audienceId) {
       const teamSnap = await db.collection("teams").doc(audienceId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
       if (role === "admin") {
         const team = teamSnap.data();
-        if (team?.leaderId !== myId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        if (team?.leaderId !== myId && team?.leader2Id !== myId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
       if (eventId) {
         const eventSnap = await db.collection("events").doc(eventId).get();

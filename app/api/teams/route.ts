@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
         id: d.id,
         name: x.name,
         leaderId: x.leaderId != null ? x.leaderId : null,
+        leader2Id: x.leader2Id != null ? x.leader2Id : null,
         memberIds: Array.isArray(x.memberIds) ? x.memberIds : [],
         dayOfWeek: x.dayOfWeek !== undefined ? x.dayOfWeek : undefined,
         isWrapUp: x.isWrapUp === true,
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
       };
     });
     if (myRole === "admin") {
-      teams = teams.filter((t) => t.leaderId === myId);
+      teams = teams.filter((t) => t.leaderId === myId || t.leader2Id === myId);
     } else if (myRole === "member") {
       teams = teams.filter((t) => t.memberIds.includes(myId));
     }
@@ -55,19 +56,26 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
-    const dayOfWeek = typeof body.dayOfWeek === "number" && body.dayOfWeek >= 0 && body.dayOfWeek <= 6 ? body.dayOfWeek : undefined;
+    const dayOfWeek =
+      typeof body.dayOfWeek === "number" && body.dayOfWeek >= 0 && body.dayOfWeek <= 6
+        ? body.dayOfWeek
+        : undefined;
     const isWrapUp = body.isWrapUp === true;
 
     const now = Date.now();
-    const ref = await db.collection("teams").add({
+    const data: Record<string, unknown> = {
       name,
       leaderId: null,
+      leader2Id: null,
       memberIds: [],
-      dayOfWeek: dayOfWeek,
       isWrapUp: isWrapUp,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    if (dayOfWeek !== undefined) {
+      data.dayOfWeek = dayOfWeek;
+    }
+    const ref = await db.collection("teams").add(data);
     return NextResponse.json({ id: ref.id, name });
   } catch (e) {
     console.error(e);

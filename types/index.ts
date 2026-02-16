@@ -23,6 +23,8 @@ export interface Team {
   id: string;
   name: string;
   leaderId: string | null;
+  /** Optional second leader for this team */
+  leader2Id: string | null;
   memberIds: string[];
   /** 0=Sun, 1=Mon, ... 6=Sat; only for wrap-up day teams */
   dayOfWeek?: number;
@@ -39,8 +41,8 @@ export interface Event {
   dateFrom: string;
   dateTo: string;
   teamIds: string[];
-  /** Per-team overrides for this event only: memberIds and/or leaderId */
-  teamOverrides?: Record<string, { memberIds?: string[]; leaderId?: string }>;
+  /** Per-team overrides for this event only: memberIds and/or leaders */
+  teamOverrides?: Record<string, { memberIds?: string[]; leaderId?: string; leader2Id?: string }>;
   /** Overall event duration (super admin only) */
   overallStartTime?: string;
   overallEndTime?: string;

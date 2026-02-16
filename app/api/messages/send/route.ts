@@ -5,12 +5,22 @@ import { sendEmail, isEmailConfigured } from "@/lib/nodemailer";
 import { sendSmsGate, isSmsGateConfigured } from "@/lib/sms-gate";
 import { toE164 } from "@/lib/phone";
 
-function resolveBody(body: string, name: string, team: string): string {
+function resolveBody(
+  body: string,
+  name: string,
+  team: string,
+  senderName: string,
+  eventName: string,
+  teamMembers: string,
+  teamLeaders: string
+): string {
   return body
-    .replace(/\{\{Name\}\}/g, name)
-    .replace(/\{\{name\}\}/g, name)
-    .replace(/\{\{Team\}\}/g, team)
-    .replace(/\{\{team\}\}/g, team);
+    .replace(/\{\{Name\}\}|\{\{name\}\}/g, name)
+    .replace(/\{\{Team\}\}|\{\{team\}\}|\{\{TeamName\}\}/g, team)
+    .replace(/\{\{YourName\}\}|\{\{your name\}\}/gi, senderName)
+    .replace(/\{\{EventName\}\}|\{\{event name\}\}/gi, eventName)
+    .replace(/\{\{TeamMembers\}\}|\{\{team members\}\}/gi, teamMembers)
+    .replace(/\{\{TeamLeaders\}\}|\{\{team leaders\}\}/gi, teamLeaders);
 }
 
 export async function POST(req: NextRequest) {
@@ -43,16 +53,77 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Select at least one channel (email, sms, or whatsapp)" }, { status: 400 });
     }
 
+    // Compute sender display name for {{YourName}} placeholder
+    const meData = membersSnap.docs[0].data();
+    const senderName =
+      (meData.name != null && String(meData.name).trim()) ||
+      [meData.title, meData.firstName, meData.lastName].filter(Boolean).join(" ") ||
+      meData.email ||
+      "";
+
     let recipientIds: string[] = [];
+    let eventName = "";
+    const memberEventTeam: Record<string, string> = {};
+    const eventTeamMeta: Record<string, { name: string; memberIds: string[]; leaderIds: string[] }> = {};
     if (audienceType === "entire_team") {
-      const membersSnap2 = await db.collection("members").get();
-      recipientIds = membersSnap2.docs.map((d) => d.id);
+      if (eventId) {
+        const eventSnap = await db.collection("events").doc(eventId).get();
+        if (!eventSnap.exists) {
+          return NextResponse.json({ error: "Event not found" }, { status: 400 });
+        }
+        const ev = eventSnap.data()!;
+        eventName = typeof ev.name === "string" ? ev.name : "";
+        const teamIds = (ev.teamIds as string[]) || [];
+
+        const teamsSnap = await db.collection("teams").get();
+        const teamsMap = new Map<string, { name: string; memberIds: string[]; leaderIds: string[] }>();
+        teamsSnap.docs.forEach((d) => {
+          const x = d.data();
+          teamsMap.set(
+            d.id,
+            {
+              name: (x.name as string) || d.id,
+              memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
+              leaderIds: [
+                ...(x.leaderId ? [String(x.leaderId)] : []),
+                ...(x.leader2Id ? [String(x.leader2Id)] : []),
+              ],
+            }
+          );
+        });
+
+        const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
+        const idSet = new Set<string>();
+        for (const tid of teamIds) {
+          const base = teamsMap.get(tid);
+          if (!base) continue;
+          const override = overrides[tid];
+          const effectiveMembers = Array.isArray(override?.memberIds) ? override!.memberIds! : base.memberIds;
+          eventTeamMeta[tid] = {
+            name: base.name,
+            memberIds: effectiveMembers,
+            leaderIds: base.leaderIds,
+          };
+          for (const mid of effectiveMembers) {
+            idSet.add(mid);
+            if (!memberEventTeam[mid]) {
+              memberEventTeam[mid] = tid;
+            }
+          }
+        }
+        recipientIds = Array.from(idSet);
+      } else {
+        const membersSnap2 = await db.collection("members").get();
+        recipientIds = membersSnap2.docs.map((d) => d.id);
+      }
     } else if (audienceType === "sub_team" && audienceId) {
       const teamSnap = await db.collection("teams").doc(audienceId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
       if (role === "admin") {
         const team = teamSnap.data();
-        if (team?.leaderId !== myId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        if (team?.leaderId !== myId && team?.leader2Id !== myId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
       if (eventId) {
         const eventSnap = await db.collection("events").doc(eventId).get();
@@ -128,12 +199,48 @@ export async function POST(req: NextRequest) {
       let failed = 0;
       let lastError: string | null = null;
 
+      const getContextForMember = (memberId: string) => {
+        const member = membersMap[memberId];
+        if (!member) {
+          return {
+            member,
+            teamName: "",
+            teamMembersList: "",
+            teamLeadersList: "",
+          };
+        }
+        const eventTeamId = memberEventTeam[memberId];
+        if (eventTeamId && eventTeamMeta[eventTeamId]) {
+          const meta = eventTeamMeta[eventTeamId];
+          const teamMembersList = meta.memberIds
+            .map((mid) => (membersMap[mid]?.name != null ? membersMap[mid].name : mid))
+            .join(", ");
+          const teamLeadersList = meta.leaderIds
+            .map((lid) => (membersMap[lid]?.name != null ? membersMap[lid].name : lid))
+            .filter(Boolean)
+            .join(", ");
+          return {
+            member,
+            teamName: meta.name,
+            teamMembersList,
+            teamLeadersList,
+          };
+        }
+        const fallbackTeamName =
+          member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
+        return {
+          member,
+          teamName: fallbackTeamName,
+          teamMembersList: "",
+          teamLeadersList: "",
+        };
+      };
+
       if (channel === "email" && isEmailConfigured()) {
         for (const memberId of recipientIds) {
-          const member = membersMap[memberId];
+          const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
           if (!member || !member.email) { failed++; continue; }
-          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-          const text = resolveBody(templateBody, member.name, teamName);
+          const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList);
           const result = await sendEmail({ to: member.email, subject: templateName, text });
           if (result.ok) sent++; else { console.error("Email send failed for", memberId, result.error); failed++; }
         }
@@ -142,11 +249,10 @@ export async function POST(req: NextRequest) {
         summaryParts.push("Email: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
       } else if (channel === "sms" && useSmsGateForSms) {
         for (const memberId of recipientIds) {
-          const member = membersMap[memberId];
+          const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
           const e164 = member ? toE164(member.phone) : null;
           if (!member || !e164) { lastError = member ? "Phone invalid." : "Member not found."; failed++; continue; }
-          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-          const text = resolveBody(templateBody, member.name, teamName);
+          const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList);
           const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
           if (result.ok) sent++; else { lastError = result.error ?? "SMS error"; console.error("SMS Gate send failed for", memberId, result.error); failed++; }
         }
@@ -157,10 +263,9 @@ export async function POST(req: NextRequest) {
         const client = twilio(sid, authToken);
         const from = channel === "whatsapp" ? "whatsapp:" + fromNumber : fromNumber;
         for (const memberId of recipientIds) {
-          const member = membersMap[memberId];
+          const { member, teamName, teamMembersList, teamLeadersList } = getContextForMember(memberId);
           if (!member || !member.phone) { failed++; continue; }
-          const teamName = member.teamIds.length > 0 && teamsMap[member.teamIds[0]] != null ? teamsMap[member.teamIds[0]] : "";
-          const text = resolveBody(templateBody, member.name, teamName);
+          const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList);
           const e164 = toE164(member.phone);
           if (!e164) { failed++; continue; }
           const to = channel === "whatsapp" ? "whatsapp:" + e164 : e164;

@@ -42,6 +42,7 @@ export async function GET(
           id: d.id,
           name: t.name,
           leaderId: override?.leaderId != null ? override.leaderId : t.leaderId ?? null,
+          leader2Id: override?.leader2Id != null ? override.leader2Id : t.leader2Id ?? null,
           memberIds: Array.isArray(override?.memberIds) ? override.memberIds : (Array.isArray(t.memberIds) ? t.memberIds : []),
           dayOfWeek: t.dayOfWeek,
           isWrapUp: t.isWrapUp === true,

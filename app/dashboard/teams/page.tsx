@@ -16,7 +16,10 @@ export default function TeamsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editLeaderId, setEditLeaderId] = useState<string | null>(null);
+  const [editLeader2Id, setEditLeader2Id] = useState<string | null>(null);
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [teamSort, setTeamSort] = useState<"name-asc" | "name-desc" | "size-desc">("name-asc");
 
   const isSuper = profile?.role === "super_admin";
 
@@ -68,6 +71,7 @@ export default function TeamsPage() {
     setEditingId(t.id);
     setEditName(t.name);
     setEditLeaderId(t.leaderId);
+    setEditLeader2Id(t.leader2Id ?? null);
     setEditMemberIds(Array.isArray(t.memberIds) ? t.memberIds : []);
   };
 
@@ -81,6 +85,7 @@ export default function TeamsPage() {
         body: JSON.stringify({
           name: editName,
           leaderId: editLeaderId,
+          leader2Id: editLeader2Id,
           memberIds: editMemberIds,
         }),
       });
@@ -107,6 +112,34 @@ export default function TeamsPage() {
       prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
     );
   };
+
+  const memberSearchLower = memberSearch.trim().toLowerCase();
+  const filteredMembersForEdit = memberSearchLower
+    ? members.filter((m) => {
+        const name = (m.name || `${m.firstName || ""} ${m.lastName || ""}`).toLowerCase();
+        const email = (m.email || "").toLowerCase();
+        return name.includes(memberSearchLower) || email.includes(memberSearchLower);
+      })
+    : members;
+
+  const sortedMembersForEdit = [...filteredMembersForEdit].sort((a, b) => {
+    const an = (a.name || `${a.firstName || ""} ${a.lastName || ""}`).toLowerCase();
+    const bn = (b.name || `${b.firstName || ""} ${b.lastName || ""}`).toLowerCase();
+    return an.localeCompare(bn);
+  });
+
+  const sortedTeams = [...teams].sort((a, b) => {
+    if (teamSort === "size-desc") {
+      const as = Array.isArray(a.memberIds) ? a.memberIds.length : 0;
+      const bs = Array.isArray(b.memberIds) ? b.memberIds.length : 0;
+      if (bs !== as) return bs - as;
+      return a.name.localeCompare(b.name);
+    }
+    if (teamSort === "name-desc") {
+      return b.name.localeCompare(a.name);
+    }
+    return a.name.localeCompare(b.name);
+  });
 
   if (profile?.role === "member") {
     return (
@@ -143,7 +176,24 @@ export default function TeamsPage() {
         <p className="text-stone-500">Loading...</p>
       ) : (
         <div className="space-y-4">
-          {teams.map((t) => (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-stone-500 dark:text-stone-400">
+              {sortedTeams.length} team{sortedTeams.length === 1 ? "" : "s"}
+            </p>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-stone-500 dark:text-stone-400">Sort by</span>
+              <select
+                value={teamSort}
+                onChange={(e) => setTeamSort(e.target.value as typeof teamSort)}
+                className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600 dark:bg-stone-800 dark:text-white"
+              >
+                <option value="name-asc">Name (A–Z)</option>
+                <option value="name-desc">Name (Z–A)</option>
+                <option value="size-desc">Member count (high → low)</option>
+              </select>
+            </div>
+          </div>
+          {sortedTeams.map((t) => (
             <div
               key={t.id}
               className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800"
@@ -156,23 +206,49 @@ export default function TeamsPage() {
                     onChange={(e) => setEditName(e.target.value)}
                     className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                   />
-                  <div>
-                    <p className="mb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Leader</p>
-                    <select
-                      value={editLeaderId != null ? editLeaderId : ""}
-                      onChange={(e) => setEditLeaderId(e.target.value || null)}
-                      className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                    >
-                      <option value="">—</option>
-                      {members.map((m) => (
-                        <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-                      ))}
-                    </select>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Leader 1</p>
+                      <select
+                        value={editLeaderId != null ? editLeaderId : ""}
+                        onChange={(e) => setEditLeaderId(e.target.value || null)}
+                        className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                      >
+                        <option value="">—</option>
+                        {members.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Leader 2 (optional)</p>
+                      <select
+                        value={editLeader2Id != null ? editLeader2Id : ""}
+                        onChange={(e) => setEditLeader2Id(e.target.value || null)}
+                        className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                      >
+                        <option value="">—</option>
+                        {members
+                          .filter((m) => m.id !== editLeaderId)
+                          .map((m) => (
+                            <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+                          ))}
+                      </select>
+                    </div>
                   </div>
                   <div>
-                    <p className="mb-1 text-xs font-medium text-stone-500 dark:text-stone-400">Members</p>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-stone-500 dark:text-stone-400">Members</p>
+                      <input
+                        type="search"
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                        placeholder="Search members by name or email..."
+                        className="w-40 rounded border border-stone-300 px-2 py-1 text-xs placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                      />
+                    </div>
                     <div className="max-h-40 space-y-1 overflow-y-auto">
-                      {members.map((m) => (
+                      {sortedMembersForEdit.map((m) => (
                         <label key={m.id} className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
@@ -206,7 +282,15 @@ export default function TeamsPage() {
                   <div>
                     <p className="font-medium text-stone-900 dark:text-white">{t.name}</p>
                     <p className="text-xs text-stone-500 dark:text-stone-400">
-                      Leader: {members.find((m) => m.id === t.leaderId)?.name != null ? members.find((m) => m.id === t.leaderId)!.name : "—"} · {t.memberIds != null ? t.memberIds.length : 0} members
+                      {(() => {
+                        const leaderNames: string[] = [];
+                        const l1 = members.find((m) => m.id === t.leaderId);
+                        const l2 = t.leader2Id ? members.find((m) => m.id === t.leader2Id) : undefined;
+                        if (l1) leaderNames.push(l1.name);
+                        if (l2 && (!l1 || l2.id !== l1.id)) leaderNames.push(l2.name);
+                        const leadersLabel = leaderNames.length > 0 ? leaderNames.join(", ") : "—";
+                        return `Leaders: ${leadersLabel} · ${t.memberIds != null ? t.memberIds.length : 0} members`;
+                      })()}
                     </p>
                   </div>
                   <div className="flex gap-2">

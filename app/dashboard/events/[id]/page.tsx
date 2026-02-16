@@ -13,6 +13,7 @@ interface EventTeam {
   id: string;
   name: string;
   leaderId: string | null;
+  leader2Id: string | null;
   memberIds: string[];
 }
 
@@ -207,8 +208,11 @@ export default function EventDetailPage() {
   if (loading) return <p className="text-stone-500">Loading…</p>;
   if (!event) return <p className="text-stone-500">Event not found.</p>;
 
-  const myTeamIds = profile?.teamIds ?? [];
-  const myTeamsInEvent = event.teams?.filter((t) => t.memberIds.includes(profile?.id ?? "") || t.leaderId === profile?.id) ?? [];
+  const myTeamsInEvent =
+    event.teams?.filter((t) => {
+      const me = profile?.id ?? "";
+      return t.memberIds.includes(me) || t.leaderId === me || t.leader2Id === me;
+    }) ?? [];
 
   return (
     <div>

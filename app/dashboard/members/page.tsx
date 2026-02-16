@@ -35,6 +35,7 @@ export default function MembersPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"name-asc" | "name-desc" | "role">("name-asc");
 
   const canManage = profile?.role === "super_admin";
 
@@ -52,6 +53,23 @@ export default function MembersPage() {
           (m.title && m.title.toLowerCase().includes(searchLower))
       )
     : members;
+
+  const getDisplayName = (m: Member) => {
+    if (m.name && m.name.trim()) return m.name.trim();
+    const full = `${m.firstName || ""} ${m.lastName || ""}`.trim();
+    if (full) return full;
+    return m.email || "";
+  };
+
+  const sortedMembers = [...filteredMembers].sort((a, b) => {
+    if (sortBy === "role") {
+      if (a.role !== b.role) return a.role.localeCompare(b.role);
+      return getDisplayName(a).localeCompare(getDisplayName(b));
+    }
+    const an = getDisplayName(a).toLowerCase();
+    const bn = getDisplayName(b).toLowerCase();
+    return sortBy === "name-desc" ? bn.localeCompare(an) : an.localeCompare(bn);
+  });
 
   const fetchMembers = async () => {
     const headers = await getAuthHeaders();
@@ -406,19 +424,33 @@ export default function MembersPage() {
         <p className="text-stone-500">Loading...</p>
       ) : (
         <div className="space-y-4">
-          <div className="mb-4">
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, email, phone, ITS number, role..."
-              className="w-full max-w-md rounded-lg border border-stone-300 px-4 py-2.5 text-sm placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder:text-stone-500"
-            />
-            {searchQuery.trim() && (
-              <p className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">
-                Showing {filteredMembers.length} of {members.length} members
-              </p>
-            )}
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, email, phone, ITS number, role..."
+                className="w-full max-w-md rounded-lg border border-stone-300 px-4 py-2.5 text-sm placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder:text-stone-500"
+              />
+              {searchQuery.trim() && (
+                <p className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">
+                  Showing {filteredMembers.length} of {members.length} members
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-stone-500 dark:text-stone-400">Sort by</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600 dark:bg-stone-800 dark:text-white"
+              >
+                <option value="name-asc">Name (A–Z)</option>
+                <option value="name-desc">Name (Z–A)</option>
+                <option value="role">Role</option>
+              </select>
+            </div>
           </div>
           <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800">
             <table className="min-w-full divide-y divide-stone-200 dark:divide-stone-600">
@@ -445,7 +477,7 @@ export default function MembersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-600">
-              {filteredMembers.map((m) => (
+              {sortedMembers.map((m) => (
                 <tr key={m.id} className="text-stone-700 dark:text-stone-300">
                   {canManage && (
                     <td className="whitespace-nowrap px-3 py-3">

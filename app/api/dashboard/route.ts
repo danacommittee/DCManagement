@@ -33,8 +33,12 @@ export async function GET(req: NextRequest) {
     });
 
     if (myRole === "admin") {
-      const myTeamIds = Array.isArray(membersSnap.docs[0].data().teamIds) ? (membersSnap.docs[0].data().teamIds as string[]) : [];
-      const leadTeamIds = teamsSnap.docs.filter((t) => t.data().leaderId === myId).map((t) => t.id);
+      const leadTeamIds = teamsSnap.docs
+        .filter((t) => {
+          const x = t.data();
+          return x.leaderId === myId || x.leader2Id === myId;
+        })
+        .map((t) => t.id);
       totalTeams = leadTeamIds.length;
       const myLeadMemberIds = new Set<string>();
       for (const tid of leadTeamIds) {

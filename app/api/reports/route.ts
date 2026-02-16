@@ -42,14 +42,24 @@ export async function GET(req: NextRequest) {
     if (eventId) records = records.filter((r) => r.eventId === eventId);
     if (myRole === "admin") {
       const teamsSnap = await db.collection("teams").get();
-      const leaderTeamIds = new Set(teamsSnap.docs.filter((d) => d.data().leaderId === myId).map((d) => d.id));
+      const leaderTeamIds = new Set(
+        teamsSnap.docs
+          .filter((d) => {
+            const t = d.data();
+            return t.leaderId === myId || t.leader2Id === myId;
+          })
+          .map((d) => d.id)
+      );
       records = records.filter((r) => leaderTeamIds.has(r.teamId));
     }
     if (teamId) {
       const teamSnap = await db.collection("teams").doc(teamId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
-      if (myRole === "admin" && teamSnap.data()?.leaderId !== myId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (myRole === "admin") {
+        const t = teamSnap.data();
+        if (t?.leaderId !== myId && t?.leader2Id !== myId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
       records = records.filter((r) => r.teamId === teamId);
     }

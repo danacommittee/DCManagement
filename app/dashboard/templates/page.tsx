@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import type { Template } from "@/types";
@@ -14,8 +14,38 @@ export default function TemplatesPage() {
   const [body, setBody] = useState("");
   const [category, setCategory] = useState<Template["category"]>("custom");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const newBodyRef = useRef<HTMLTextAreaElement | null>(null);
 
   const canEdit = profile?.role === "super_admin" || profile?.role === "admin";
+
+  const insertPlaceholderNew = (placeholder: string) => {
+    const el = newBodyRef.current;
+    if (!el) {
+      setBody((prev) => (prev ? `${prev} ${placeholder}` : placeholder));
+      return;
+    }
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const next = el.value.slice(0, start) + placeholder + el.value.slice(end);
+    setBody(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + placeholder.length;
+      el.selectionStart = el.selectionEnd = pos;
+    });
+  };
+
+  const insertPlaceholderExisting = (templateId: string, placeholder: string) => {
+    const bodyEl = document.getElementById(`body-${templateId}`) as HTMLTextAreaElement | null;
+    if (!bodyEl) return;
+    const start = bodyEl.selectionStart ?? bodyEl.value.length;
+    const end = bodyEl.selectionEnd ?? bodyEl.value.length;
+    const next = bodyEl.value.slice(0, start) + placeholder + bodyEl.value.slice(end);
+    bodyEl.value = next;
+    const pos = start + placeholder.length;
+    bodyEl.selectionStart = bodyEl.selectionEnd = pos;
+    bodyEl.focus();
+  };
 
   const fetchTemplates = async () => {
     const headers = await getAuthHeaders();
@@ -94,7 +124,8 @@ export default function TemplatesPage() {
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Templates</h1>
       <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">
-        Use placeholders like {"{{Name}}"}, {"{{Team}}"} in the body. They will be replaced when sending.
+        Use placeholders like {"{{Name}}"}, {"{{Team}}"}, {"{{YourName}}"}, {"{{EventName}}"}, {"{{TeamMembers}}"},{" "}
+        {"{{TeamLeaders}}"} in the body. They will be replaced when sending.
       </p>
       {canEdit && (
         <div className="mb-6">
@@ -105,6 +136,22 @@ export default function TemplatesPage() {
           >
             {showForm ? "Cancel" : "Add template"}
           </button>
+          {canEdit && !showForm && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(true);
+                setName("Event welcome message");
+                setCategory("special_event");
+                setBody(
+                  "Dear {{Name}},\n\nWelcome to {{EventName}}.\n\nYou are in team {{TeamName}}.\nYour team members: {{TeamMembers}}.\nYour team leader(s): {{TeamLeaders}}.\n\nWarm regards,\n{{YourName}}"
+                );
+              }}
+              className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
+            >
+              Quick create event welcome template
+            </button>
+          )}
           {showForm && (
             <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
               <input
@@ -127,10 +174,31 @@ export default function TemplatesPage() {
               <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                placeholder="Body (use {{Name}}, {{Team}}...)"
+                placeholder="Body (use {{Name}}, {{Team}}, {{YourName}}, {{EventName}} ...)"
                 rows={4}
-                className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                ref={newBodyRef}
+                className="mb-2 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
+              <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                <span className="text-stone-500 dark:text-stone-400">Insert keyword:</span>
+                {[
+                  { label: "Name", value: "{{Name}}" },
+                  { label: "Team", value: "{{Team}}" },
+                  { label: "Your name", value: "{{YourName}}" },
+                  { label: "Event name", value: "{{EventName}}" },
+                  { label: "Team members", value: "{{TeamMembers}}" },
+                  { label: "Team leaders", value: "{{TeamLeaders}}" },
+                ].map((k) => (
+                  <button
+                    key={k.value}
+                    type="button"
+                    onClick={() => insertPlaceholderNew(k.value)}
+                    className="rounded border border-stone-300 px-2 py-0.5 text-xs text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:text-stone-200 dark:hover:bg-stone-600"
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={create}
@@ -165,6 +233,26 @@ export default function TemplatesPage() {
                     rows={3}
                     className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                   />
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="text-stone-500 dark:text-stone-400">Insert keyword:</span>
+                    {[
+                      { label: "Name", value: "{{Name}}" },
+                      { label: "Team", value: "{{Team}}" },
+                      { label: "Your name", value: "{{YourName}}" },
+                      { label: "Event name", value: "{{EventName}}" },
+                      { label: "Team members", value: "{{TeamMembers}}" },
+                      { label: "Team leaders", value: "{{TeamLeaders}}" },
+                    ].map((k) => (
+                      <button
+                        key={k.value}
+                        type="button"
+                        onClick={() => insertPlaceholderExisting(t.id, k.value)}
+                        className="rounded border border-stone-300 px-2 py-0.5 text-xs text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:text-stone-200 dark:hover:bg-stone-600"
+                      >
+                        {k.label}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"

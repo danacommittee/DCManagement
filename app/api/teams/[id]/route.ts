@@ -21,13 +21,19 @@ export async function PATCH(
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
     if (typeof body.name === "string") updates.name = body.name;
     if (body.leaderId !== undefined) updates.leaderId = body.leaderId;
+    if (body.leader2Id !== undefined) updates.leader2Id = body.leader2Id;
     if (Array.isArray(body.memberIds)) updates.memberIds = body.memberIds;
     if (typeof body.dayOfWeek === "number" && body.dayOfWeek >= 0 && body.dayOfWeek <= 6) updates.dayOfWeek = body.dayOfWeek;
     if (body.isWrapUp !== undefined) updates.isWrapUp = body.isWrapUp === true;
 
     const teamSnap = await db.collection("teams").doc(id).get();
     if (!teamSnap.exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (myRole !== "super_admin" && teamSnap.data()?.leaderId !== myId) {
+    const teamData = teamSnap.data();
+    if (
+      myRole !== "super_admin" &&
+      teamData?.leaderId !== myId &&
+      teamData?.leader2Id !== myId
+    ) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

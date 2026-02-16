@@ -116,11 +116,19 @@ curl -H "Authorization: Bearer your-secret" \
 
 ### Common Issues
 
-**Issue: "Unauthorized" error**
-- Solution: Set `CRON_SECRET` environment variable and include it in Authorization header
-
 **Issue: Messages stuck in "pending"**
 - Solution: Cron job might not be running. Check Vercel Cron Jobs or external cron service
+
+**Issue: 500 Internal Server Error when cron hits the endpoint**
+- **Cause:** On Vercel, Firebase Admin needs credentials from an env var, not a file path.
+- **Solution:**
+  1. In Vercel → Project → Settings → Environment Variables, add **FIREBASE_SERVICE_ACCOUNT_JSON**.
+  2. Value: paste the **entire JSON** from your Firebase service account key file (the same file you use locally, e.g. `config/firebase-service-account.json`). Do **not** use only `GOOGLE_APPLICATION_CREDENTIALS` with a path — that file does not exist on Vercel’s serverless runtime.
+  3. Redeploy after adding the variable.
+  4. Check Vercel → Deployments → [your deployment] → **Functions** (or **Logs**) and trigger the cron again; the logs will show the exact error if something else fails.
+
+**Issue: "Unauthorized" (401)**
+- Solution: Set `CRON_SECRET` in Vercel env and use the same value in the cron job’s `Authorization: Bearer <CRON_SECRET>` header.
 
 **Issue: Messages marked as "failed"**
 - Solution: Check error field in Firestore document. Common causes:

@@ -153,7 +153,16 @@ export async function GET(req: NextRequest) {
     console.log(`[Process Scheduled] Result:`, result);
     return NextResponse.json(result);
   } catch (e) {
-    console.error("[Process Scheduled Messages] Error:", e);
-    return NextResponse.json({ error: "Server error", details: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    const message = e instanceof Error ? e.message : String(e);
+    const stack = e instanceof Error ? e.stack : undefined;
+    console.error("[Process Scheduled Messages] Error:", message, stack);
+    // Return 200 with ok: false so cron-job.org doesn't disable the job after repeated failures.
+    // Include error details for debugging. Check Vercel logs and env vars (FIREBASE_SERVICE_ACCOUNT_JSON, CRON_SECRET).
+    return NextResponse.json({
+      ok: false,
+      error: "Server error",
+      details: message,
+      hint: "Check Vercel Function Logs and ensure FIREBASE_SERVICE_ACCOUNT_JSON is set in Vercel env (not only GOOGLE_APPLICATION_CREDENTIALS).",
+    }, { status: 200 });
   }
 }

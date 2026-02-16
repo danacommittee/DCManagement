@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
     const eventId = searchParams.get("eventId")?.trim() || null;
     const audienceType = searchParams.get("audienceType");
     const audienceId = searchParams.get("audienceId") || "";
+    const audienceIdsParam = searchParams.get("audienceIds");
+    const audienceIds: string[] = audienceIdsParam ? audienceIdsParam.split(",").map((id) => id.trim()).filter(Boolean) : [];
 
     if (!["individual", "sub_team", "entire_team"].includes(audienceType || "")) {
       return NextResponse.json({ error: "Invalid audienceType" }, { status: 400 });
@@ -41,15 +43,17 @@ export async function GET(req: NextRequest) {
         const teamIds = (ev.teamIds as string[]) || [];
 
         const teamsSnap = await db.collection("teams").get();
-        const teamsMap = new Map<string, { memberIds: string[] }>();
+        const teamsMap = new Map<string, { memberIds: string[]; leaderIds: string[] }>();
         teamsSnap.docs.forEach((d) => {
           const x = d.data();
-          teamsMap.set(
-            d.id,
-            {
-              memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
-            }
-          );
+          const leaderIds = [
+            ...(x.leaderId ? [String(x.leaderId)] : []),
+            ...(x.leader2Id ? [String(x.leader2Id)] : []),
+          ];
+          teamsMap.set(d.id, {
+            memberIds: Array.isArray(x.memberIds) ? (x.memberIds as string[]) : [],
+            leaderIds,
+          });
         });
 
         const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
@@ -60,6 +64,7 @@ export async function GET(req: NextRequest) {
           const override = overrides[tid];
           const effectiveMembers = Array.isArray(override?.memberIds) ? override!.memberIds! : base.memberIds;
           for (const mid of effectiveMembers) idSet.add(mid);
+          for (const lid of base.leaderIds) idSet.add(lid);
         }
         recipientIds = Array.from(idSet);
       } else {
@@ -75,6 +80,12 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
       }
+      const team = teamSnap.data()!;
+      const leaderIds = [
+        ...(team.leaderId ? [String(team.leaderId)] : []),
+        ...(team.leader2Id ? [String(team.leader2Id)] : []),
+      ];
+      let memberIds: string[] = Array.isArray(team.memberIds) ? (team.memberIds as string[]) : [];
       if (eventId) {
         const eventSnap = await db.collection("events").doc(eventId).get();
         if (eventSnap.exists) {
@@ -83,18 +94,19 @@ export async function GET(req: NextRequest) {
           if (teamIds.includes(audienceId)) {
             const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? {};
             const override = overrides[audienceId];
-            recipientIds = Array.isArray(override?.memberIds) ? override.memberIds : (Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : []);
-          } else {
-            recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
+            if (Array.isArray(override?.memberIds)) memberIds = override.memberIds;
           }
-        } else {
-          recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
         }
-      } else {
-        recipientIds = Array.isArray(teamSnap.data()?.memberIds) ? (teamSnap.data()!.memberIds as string[]) : [];
       }
-    } else if (audienceType === "individual" && audienceId) {
-      recipientIds = [audienceId];
+      const idSet = new Set<string>(memberIds);
+      for (const lid of leaderIds) idSet.add(lid);
+      recipientIds = Array.from(idSet);
+    } else if (audienceType === "individual") {
+      if (audienceIds.length > 0) {
+        recipientIds = audienceIds;
+      } else if (audienceId) {
+        recipientIds = [audienceId];
+      }
     }
 
     const membersSnap2 = await db.collection("members").get();

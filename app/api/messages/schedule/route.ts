@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
     const eventId = typeof body.eventId === "string" ? body.eventId.trim() : null;
     const audienceType = body.audienceType;
     const audienceId = body.audienceId;
+    const audienceIds = Array.isArray(body.audienceIds) ? body.audienceIds.filter((id: unknown) => typeof id === "string").map((id: string) => String(id).trim()) : undefined;
+    const bodyOverride = typeof body.bodyOverride === "string" ? body.bodyOverride : undefined;
+    const subjectOverride = typeof body.subjectOverride === "string" ? body.subjectOverride : undefined;
     const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
     const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
     const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
@@ -62,6 +65,15 @@ export async function POST(req: NextRequest) {
     }
     if (audienceType !== "entire_team" && audienceId) {
       scheduledMessage.audienceId = audienceId;
+    }
+    if (audienceIds?.length) {
+      scheduledMessage.audienceIds = audienceIds;
+    }
+    if (bodyOverride) {
+      scheduledMessage.bodyOverride = bodyOverride;
+    }
+    if (subjectOverride) {
+      scheduledMessage.subjectOverride = subjectOverride;
     }
 
     const ref = await db.collection("scheduledMessages").add(scheduledMessage);

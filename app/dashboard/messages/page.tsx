@@ -18,6 +18,21 @@ function toLocalDatetimeLocalString(d: Date): string {
   return `${y}-${mo}-${day}T${h}:${min}`;
 }
 
+/** Resolve only the placeholders we can fill from the form (event, team, sender). Leave {{Name}}, {{TeamMembers}}, {{TeamLeaders}}, {{TeamsList}} as-is so the server can replace them per recipient when sending. */
+function resolvePreviewBody(
+  body: string,
+  opts: { eventName?: string; teamName?: string; senderName?: string }
+): string {
+  const eventName = opts.eventName ?? "—";
+  const teamName = opts.teamName ?? "—";
+  const senderName = opts.senderName ?? "—";
+  return body
+    .replace(/\{\{Team\}\}|\{\{team\}\}|\{\{TeamName\}\}/g, teamName)
+    .replace(/\{\{YourName\}\}|\{\{your name\}\}/gi, senderName)
+    .replace(/\{\{EventName\}\}|\{\{event name\}\}/gi, eventName);
+  // Do NOT replace {{Name}}, {{TeamMembers}}, {{TeamLeaders}}, {{TeamsList}} — server fills those per recipient
+}
+
 export default function MessagesPage() {
   const { profile } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -36,9 +51,12 @@ export default function MessagesPage() {
   const [eventTeams, setEventTeams] = useState<{ id: string; name: string }[]>([]);
   const [audienceType, setAudienceType] = useState<"individual" | "sub_team" | "entire_team">("entire_team");
   const [audienceId, setAudienceId] = useState("");
+  const [audienceIds, setAudienceIds] = useState<string[]>([]);
   const [channels, setChannels] = useState<("email" | "sms" | "whatsapp")[]>(["email"]);
   const [recipients, setRecipients] = useState<{ id: string; name: string }[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(false);
+  const [previewBody, setPreviewBody] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
   const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
   const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
@@ -115,7 +133,7 @@ export default function MessagesPage() {
   const canFetchRecipients =
     audienceType === "entire_team" ||
     (audienceType === "sub_team" && !!audienceId) ||
-    (audienceType === "individual" && !!audienceId);
+    (audienceType === "individual" && (audienceIds.length > 0 || !!audienceId));
 
   useEffect(() => {
     if (!canFetchRecipients) {
@@ -123,16 +141,43 @@ export default function MessagesPage() {
       return;
     }
     setRecipientsLoading(true);
-    const params = new URLSearchParams({ audienceType, ...(audienceId ? { audienceId } : {}), ...(eventId ? { eventId } : {}) });
+    const params = new URLSearchParams({
+      audienceType,
+      ...(eventId ? { eventId } : {}),
+      ...(audienceType === "sub_team" && audienceId ? { audienceId } : {}),
+      ...(audienceType === "individual" && audienceIds.length > 0 ? { audienceIds: audienceIds.join(",") } : {}),
+      ...(audienceType === "individual" && audienceIds.length === 0 && audienceId ? { audienceId } : {}),
+    });
     getAuthHeaders()
       .then((headers) => fetch(`/api/messages/recipients?${params}`, { headers }))
       .then((res) => (res.ok ? res.json() : { recipients: [] }))
       .then((d) => setRecipients(Array.isArray(d.recipients) ? d.recipients : []))
       .catch(() => setRecipients([]))
       .finally(() => setRecipientsLoading(false));
-  }, [canFetchRecipients, audienceType, audienceId, eventId]);
+  }, [canFetchRecipients, audienceType, audienceId, audienceIds, eventId]);
+
+  // Sync editable preview when template, event, or team selection changes (placeholder values update)
+  const selectedTemplate = templates.find((t) => t.id === templateId);
+  const selectedEvent = events.find((e) => e.id === eventId);
+  const teamsForPicker = audienceType === "sub_team" && eventId && eventTeams.length > 0 ? eventTeams : teams;
+  const selectedTeam = audienceId ? teamsForPicker.find((t) => t.id === audienceId) : null;
+  useEffect(() => {
+    if (!selectedTemplate?.body) {
+      setPreviewBody("");
+      return;
+    }
+    const eventName = selectedEvent?.name ?? "";
+    const teamName = selectedTeam?.name ?? (audienceType === "entire_team" ? "All teams" : "");
+    const senderName =
+      (profile?.name != null && String(profile.name).trim()) ||
+      [profile?.title, profile?.firstName, profile?.lastName].filter(Boolean).join(" ") ||
+      profile?.email ||
+      "";
+    setPreviewBody(resolvePreviewBody(selectedTemplate.body, { eventName, teamName, senderName }));
+  }, [selectedTemplate?.id, selectedTemplate?.body, selectedEvent?.name, audienceType, selectedTeam?.name, profile?.name, profile?.title, profile?.firstName, profile?.lastName, profile?.email]);
 
   const toggleChannel = (ch: "email" | "sms" | "whatsapp") => {
+    if (ch === "whatsapp") return; // WhatsApp disabled for now
     setChannels((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]));
     setSuccess(null);
     setError(null);
@@ -140,6 +185,7 @@ export default function MessagesPage() {
 
   const send = async () => {
     if (!templateId || channels.length === 0) return;
+    if (audienceType === "individual" && audienceIds.length === 0 && !audienceId) return;
     setError(null);
     setSuccess(null);
     setSending(true);
@@ -153,7 +199,10 @@ export default function MessagesPage() {
           eventId: eventId || undefined,
           audienceType,
           audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
-          channels,
+          audienceIds: audienceType === "individual" && audienceIds.length > 0 ? audienceIds : undefined,
+          bodyOverride: previewBody.trim() || undefined,
+          subjectOverride: channels.includes("email") && emailSubject.trim() ? emailSubject.trim() : undefined,
+          channels: channels.filter((c) => c !== "whatsapp"),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -227,7 +276,10 @@ export default function MessagesPage() {
           eventId: eventId || undefined,
           audienceType,
           audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
-          channels,
+          audienceIds: audienceType === "individual" && audienceIds.length > 0 ? audienceIds : undefined,
+          bodyOverride: previewBody.trim() || undefined,
+          subjectOverride: channels.includes("email") && emailSubject.trim() ? emailSubject.trim() : undefined,
+          channels: channels.filter((c) => c !== "whatsapp"),
           scheduledAt: scheduledTimestamp,
         }),
       });
@@ -267,15 +319,14 @@ export default function MessagesPage() {
     );
   }
 
-  const teamsForPicker = audienceType === "sub_team" && eventId && eventTeams.length > 0 ? eventTeams : teams;
-
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Send Message</h1>
       {loading ? (
         <p className="text-stone-500">Loading...</p>
       ) : (
-        <div className="max-w-lg space-y-4 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1 space-y-4 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800 lg:max-w-lg">
           <div>
             <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Template</label>
             <select
@@ -310,12 +361,21 @@ export default function MessagesPage() {
             <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Audience</label>
             <select
               value={audienceType}
-              onChange={(e) => setAudienceType(e.target.value as typeof audienceType)}
+              onChange={(e) => {
+                const next = e.target.value as typeof audienceType;
+                setAudienceType(next);
+                if (next === "individual") {
+                  setAudienceId("");
+                  setAudienceIds([]);
+                } else {
+                  setAudienceIds([]);
+                }
+              }}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
             >
               <option value="entire_team">Entire team</option>
               <option value="sub_team">Sub-team</option>
-              <option value="individual">Individual</option>
+              <option value="individual">Individual (select multiple)</option>
             </select>
           </div>
           {audienceType === "sub_team" && (
@@ -337,35 +397,67 @@ export default function MessagesPage() {
           )}
           {audienceType === "individual" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Member</label>
-              <select
-                value={audienceId}
-                onChange={(e) => setAudienceId(e.target.value)}
-                className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-              >
-                <option value="">Select member</option>
+              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Members (select one or more)</label>
+              <div className="max-h-48 overflow-y-auto rounded border border-stone-300 bg-stone-50/50 py-2 pl-2 dark:border-stone-600 dark:bg-stone-900/30">
                 {members.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+                  <label key={m.id} className="flex cursor-pointer items-center gap-2 py-1 pl-2 text-sm text-stone-700 dark:text-stone-300">
+                    <input
+                      type="checkbox"
+                      checked={audienceIds.includes(m.id)}
+                      onChange={() => {
+                        setAudienceIds((prev) =>
+                          prev.includes(m.id) ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                        );
+                        setAudienceId("");
+                      }}
+                      className="rounded border-stone-300"
+                    />
+                    <span>{m.name}{m.email ? ` (${m.email})` : ""}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
+              {audienceIds.length > 0 && (
+                <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">{audienceIds.length} selected</p>
+              )}
             </div>
           )}
           <div>
             <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">Channels (select one or more)</label>
             <div className="flex flex-wrap gap-4">
-              {(["email", "sms", "whatsapp"] as const).map((ch) => (
-                <label key={ch} className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={channels.includes(ch)}
-                    onChange={() => toggleChannel(ch)}
-                    className="rounded border-stone-300"
-                  />
-                  <span className="text-sm capitalize text-stone-700 dark:text-stone-300">{ch === "whatsapp" ? "WhatsApp" : ch === "sms" ? "SMS" : "Email"}</span>
-                </label>
-              ))}
+              {(["email", "sms", "whatsapp"] as const).map((ch) => {
+                const isWhatsApp = ch === "whatsapp";
+                return (
+                  <label
+                    key={ch}
+                    className={`flex items-center gap-2 ${isWhatsApp ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={channels.includes(ch)}
+                      onChange={() => toggleChannel(ch)}
+                      disabled={isWhatsApp}
+                      className="rounded border-stone-300"
+                    />
+                    <span className="text-sm capitalize text-stone-700 dark:text-stone-300">
+                      {ch === "whatsapp" ? "WhatsApp (coming soon)" : ch === "sms" ? "SMS" : "Email"}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </div>
+          {channels.includes("email") && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Email subject (optional)</label>
+              <input
+                type="text"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                placeholder="Defaults to template name if blank"
+                className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder-stone-400"
+              />
+            </div>
+          )}
           {canFetchRecipients && (
             <div>
               <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Recipients ({recipients.length})</label>
@@ -386,7 +478,13 @@ export default function MessagesPage() {
             <button
               type="button"
               onClick={send}
-              disabled={sending || scheduling || !templateId || channels.length === 0}
+              disabled={
+                sending ||
+                scheduling ||
+                !templateId ||
+                channels.filter((c) => c !== "whatsapp").length === 0 ||
+                (audienceType === "individual" && audienceIds.length === 0 && !audienceId)
+              }
               className="flex-1 rounded-lg bg-amber-600 py-2.5 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
             >
               {sending ? "Sending..." : "Send"}
@@ -401,7 +499,13 @@ export default function MessagesPage() {
                   setScheduleDateTime(toLocalDatetimeLocalString(inOneHour));
                 }
               }}
-              disabled={sending || scheduling || !templateId || channels.length === 0}
+              disabled={
+                sending ||
+                scheduling ||
+                !templateId ||
+                channels.filter((c) => c !== "whatsapp").length === 0 ||
+                (audienceType === "individual" && audienceIds.length === 0 && !audienceId)
+              }
               className="flex-1 rounded-lg border-2 border-amber-600 bg-white py-2.5 font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-500 dark:bg-stone-800 dark:text-amber-400 dark:hover:bg-stone-700"
             >
               Schedule Send
@@ -466,6 +570,28 @@ export default function MessagesPage() {
               <p className="mt-1 text-red-700 dark:text-red-300">{error}</p>
             </div>
           )}
+        </div>
+
+        {/* Live preview (editable); edits are used for send and do not change the template */}
+        <div className="w-full rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800 lg:max-w-md lg:min-w-[320px]">
+          <h2 className="mb-2 text-lg font-medium text-stone-900 dark:text-white">Message preview</h2>
+          <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">
+            Event, team, and your name are filled from your selection. Tags like {"{{Name}}"} and {"{{TeamsList}}"} are replaced with each recipient’s name and teams when you send. Edits here are used for this send only and do not change the template.
+          </p>
+          {selectedTemplate ? (
+            <textarea
+              value={previewBody}
+              onChange={(e) => setPreviewBody(e.target.value)}
+              placeholder="Select a template to see preview…"
+              rows={12}
+              className="w-full rounded border border-stone-300 px-3 py-2 text-sm leading-relaxed text-stone-800 dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder-stone-400"
+            />
+          ) : (
+            <p className="rounded border border-dashed border-stone-300 py-8 text-center text-sm text-stone-500 dark:border-stone-600 dark:text-stone-400">
+              Select a template to see a live preview.
+            </p>
+          )}
+        </div>
         </div>
       )}
       

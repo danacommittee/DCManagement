@@ -91,6 +91,9 @@ export interface ScheduledMessage {
   eventId?: string;
   audienceType: "individual" | "sub_team" | "entire_team";
   audienceId?: string;
+  audienceIds?: string[];
+  bodyOverride?: string;
+  subjectOverride?: string;
   channels: ("email" | "sms" | "whatsapp")[];
   scheduledAt: number; // Unix timestamp in milliseconds
   status: "pending" | "sending" | "sent" | "failed";

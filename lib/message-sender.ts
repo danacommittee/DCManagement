@@ -107,9 +107,15 @@ export interface SendMessageParams {
   eventId?: string | null;
   audienceType: "individual" | "sub_team" | "entire_team";
   audienceId?: string;
+  /** For individual: optional array of member IDs (multiple recipients). */
+  audienceIds?: string[];
   channels: ("email" | "sms" | "whatsapp")[];
   senderId: string;
   senderName: string;
+  /** If set, use this body instead of the template body (e.g. edited preview). */
+  bodyOverride?: string;
+  /** If set, use as email subject (email only; SMS/WhatsApp unchanged). */
+  subjectOverride?: string;
 }
 
 export interface SendMessageResult {
@@ -123,7 +129,7 @@ export interface SendMessageResult {
 }
 
 export async function sendMessages(params: SendMessageParams): Promise<SendMessageResult> {
-  const { templateId, eventId, audienceType, audienceId, channels, senderId, senderName } = params;
+  const { templateId, eventId, audienceType, audienceId, audienceIds, channels, senderId, senderName, bodyOverride, subjectOverride } = params;
 
   // Get template
   const templateSnap = await db.collection("templates").doc(templateId).get();
@@ -131,8 +137,9 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
     return { ok: false, sent: 0, failed: 0, recipientCount: 0, error: "Template not found" };
   }
   const templateData = templateSnap.data();
-  const templateBody = (templateData?.body as string) || "";
+  const templateBody = (bodyOverride != null && bodyOverride !== "") ? bodyOverride : ((templateData?.body as string) || "");
   const templateName = (templateData?.name as string) || "Message";
+  const emailSubject = (subjectOverride != null && subjectOverride.trim() !== "") ? subjectOverride.trim() : templateName;
   const templateAttachments = (templateData?.attachments as TemplateAttachment[] | undefined) || [];
 
   // Get recipients and team context (all teams per member so one message can list every team they're in)
@@ -181,6 +188,11 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           if (!memberEventTeams[mid]) memberEventTeams[mid] = [];
           if (!memberEventTeams[mid].includes(tid)) memberEventTeams[mid].push(tid);
         }
+        for (const lid of base.leaderIds) {
+          idSet.add(lid);
+          if (!memberEventTeams[lid]) memberEventTeams[lid] = [];
+          if (!memberEventTeams[lid].includes(tid)) memberEventTeams[lid].push(tid);
+        }
       }
       recipientIds = Array.from(idSet);
     } else {
@@ -221,17 +233,23 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         }
       }
     }
-    recipientIds = effectiveMembers;
+    const recipientSet = new Set<string>(effectiveMembers);
+    for (const lid of leaderIds) recipientSet.add(lid);
+    recipientIds = Array.from(recipientSet);
     teamMeta[audienceId] = {
       name: (team.name as string) || audienceId,
       memberIds: effectiveMembers,
       leaderIds,
     };
-    for (const mid of effectiveMembers) {
+    for (const mid of recipientSet) {
       memberEventTeams[mid] = [audienceId];
     }
-  } else if (audienceType === "individual" && audienceId) {
-    recipientIds = [audienceId];
+  } else if (audienceType === "individual") {
+    if (Array.isArray(params.audienceIds) && params.audienceIds.length > 0) {
+      recipientIds = params.audienceIds;
+    } else if (params.audienceId) {
+      recipientIds = [params.audienceId];
+    }
   }
 
   if (recipientIds.length === 0) {
@@ -349,7 +367,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         
         const result = await sendEmail({
           to: member.email,
-          subject: templateName,
+          subject: emailSubject,
           text,
           html,
           attachments: emailAttachments.length > 0 ? emailAttachments : undefined,

@@ -329,8 +329,8 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
           if (result.ok) {
             sent++;
-            if (result.messageIds && result.messageIds.length > 0) {
-              console.log(`[SMS Gate] Scheduled message sent to ${e164}, messageId: ${result.messageIds[0]}`);
+            if (result.messageId) {
+              console.log(`[SMS Gate] Scheduled message sent to ${e164}, messageId: ${result.messageId}`);
             }
           } else {
             console.error("SMS Gate send failed for", memberId, result.error);

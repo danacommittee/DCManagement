@@ -53,11 +53,23 @@ export interface Event {
 
 export type TemplateCategory = "daily" | "weekly" | "special_event" | "custom";
 
+export interface TemplateAttachment {
+  id: string;
+  name: string;
+  url: string;
+  contentType: string;
+  size?: number;
+  inline: boolean;
+  cidKey?: string;
+  createdAt: number;
+}
+
 export interface Template {
   id: string;
   name: string;
   body: string;
   category: TemplateCategory;
+  attachments?: TemplateAttachment[];
   createdAt: number;
   updatedAt: number;
 }

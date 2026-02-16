@@ -26,12 +26,21 @@ export function isEmailConfigured(): boolean {
   return getTransporter() != null;
 }
 
+export interface EmailAttachment {
+  filename: string;
+  contentType?: string;
+  content?: Buffer | string;
+  path?: string;
+  cid?: string;
+}
+
 export async function sendEmail(options: {
   to: string;
   subject: string;
   text: string;
   html?: string;
   from?: string;
+  attachments?: EmailAttachment[];
 }): Promise<{ ok: boolean; error?: string }> {
   const transporter = getTransporter();
   if (!transporter) {
@@ -45,6 +54,7 @@ export async function sendEmail(options: {
       subject: options.subject,
       text: options.text,
       html: options.html != null ? options.html : options.text.replace(/\n/g, "<br>"),
+      attachments: options.attachments,
     });
     return { ok: true };
   } catch (err) {

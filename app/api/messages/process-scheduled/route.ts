@@ -51,21 +51,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, processed: 0, message: "No scheduled messages to process" });
     }
 
-    const messages = snap.docs
-      .map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }))
-      .filter((msg): msg is ScheduledMessage => {
-        // Type guard to ensure we have a valid ScheduledMessage
+    const rawMessages = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown> & { id: string }));
+    const messages: ScheduledMessage[] = rawMessages
+      .filter((msg) => {
+        const m = msg as Record<string, unknown>;
         return (
-          typeof msg.templateId === "string" &&
-          typeof msg.audienceType === "string" &&
-          Array.isArray(msg.channels) &&
-          typeof msg.scheduledAt === "number" &&
-          typeof msg.createdBy === "string"
+          typeof m.templateId === "string" &&
+          typeof m.audienceType === "string" &&
+          Array.isArray(m.channels) &&
+          typeof m.scheduledAt === "number" &&
+          typeof m.createdBy === "string"
         );
       })
+      .map((msg) => msg as unknown as ScheduledMessage)
       .sort((a, b) => a.scheduledAt - b.scheduledAt); // Sort by scheduledAt ascending
 
     if (messages.length === 0) {

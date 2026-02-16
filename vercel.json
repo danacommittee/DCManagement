@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/messages/process-scheduled",
+      "schedule": "* * * * *"
+    }
+  ],
+  "functions": {
+    "app/api/messages/process-scheduled/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}

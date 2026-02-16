@@ -21,6 +21,8 @@ export interface SmsGateSendOptions {
 export interface SmsGateSendResult {
   ok: boolean;
   error?: string;
+  state?: string; // "Pending", "Delivered", "Failed", etc.
+  messageId?: string;
 }
 
 /**
@@ -71,8 +73,51 @@ export async function sendSmsGate(options: SmsGateSendOptions): Promise<SmsGateS
     }
     
     const responseText = await res.text();
-    console.log("[SMS Gate] Success:", { phoneCount: normalized.length, response: responseText || "OK" });
-    return { ok: true };
+    let parsedResponse: { state?: string; id?: string; recipients?: Array<{ state?: string }> } = {};
+    try {
+      parsedResponse = JSON.parse(responseText);
+    } catch (e) {
+      // If parsing fails, still treat as success if HTTP status was OK
+    }
+    
+    const state = parsedResponse.state || "Unknown";
+    const messageId = parsedResponse.id;
+    const recipientStates = parsedResponse.recipients?.map((r) => r.state).filter(Boolean) || [];
+    
+    console.log("[SMS Gate] Response:", {
+      phoneCount: normalized.length,
+      messageId,
+      state,
+      recipientStates,
+      fullResponse: responseText.substring(0, 200), // Log first 200 chars
+    });
+    
+    // "Pending" is normal - message is queued for delivery
+    // We consider it successful submission to SMS Gate
+    if (state === "Pending" || state === "Delivered" || !state) {
+      return {
+        ok: true,
+        state: state || "Pending",
+        messageId,
+      };
+    }
+    
+    // If state indicates failure, return error
+    if (state === "Failed" || state.toLowerCase().includes("error")) {
+      return {
+        ok: false,
+        error: `SMS Gate message state: ${state}`,
+        state,
+        messageId,
+      };
+    }
+    
+    // For other states, still consider it success (message was accepted)
+    return {
+      ok: true,
+      state,
+      messageId,
+    };
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
     const errorMsg = `SMS Gate network error: ${err}`;

@@ -73,6 +73,21 @@ export interface Message {
   createdBy: string;
 }
 
+export interface ScheduledMessage {
+  id: string;
+  templateId: string;
+  eventId?: string;
+  audienceType: "individual" | "sub_team" | "entire_team";
+  audienceId?: string;
+  channels: ("email" | "sms" | "whatsapp")[];
+  scheduledAt: number; // Unix timestamp in milliseconds
+  status: "pending" | "sending" | "sent" | "failed";
+  createdAt: number;
+  createdBy: string;
+  sentAt?: number; // When it was actually sent
+  error?: string;
+}
+
 export interface AttendanceRecord {
   id: string;
   eventId?: string;

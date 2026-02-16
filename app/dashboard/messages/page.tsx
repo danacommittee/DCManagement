@@ -14,8 +14,11 @@ export default function MessagesPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ message: string; sent: number; failed: number; recipientCount: number } | null>(null);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [scheduleDateTime, setScheduleDateTime] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [eventId, setEventId] = useState("");
   const [events, setEvents] = useState<{ id: string; name: string; teamIds?: string[] }[]>([]);
@@ -128,11 +131,35 @@ export default function MessagesPage() {
         return;
       }
       if (data.ok) {
+        const sent = data.sent || 0;
+        const failed = data.failed || 0;
+        const recipientCount = data.recipientCount || 0;
+        
+        // If all messages failed, show as error
+        if (sent === 0 && failed > 0) {
+          setError(
+            `All messages failed to send. ${data.message || "Check the error details above or server logs for more information."}`
+          );
+          return;
+        }
+        
+        // If some succeeded and some failed, show success with warning
+        if (sent > 0 && failed > 0) {
+          setSuccess({
+            message: `${data.message || "Message sent"} (Warning: ${failed} failed)`,
+            sent,
+            failed,
+            recipientCount,
+          });
+          return;
+        }
+        
+        // All succeeded
         setSuccess({
           message: data.message || "Message sent successfully",
-          sent: data.sent || 0,
-          failed: data.failed || 0,
-          recipientCount: data.recipientCount || 0,
+          sent,
+          failed,
+          recipientCount,
         });
       } else {
         setError(data.message || "Failed to send message");
@@ -141,6 +168,60 @@ export default function MessagesPage() {
       setError(e instanceof Error ? e.message : "Failed to send message");
     } finally {
       setSending(false);
+    }
+  };
+
+  const scheduleSend = async () => {
+    if (!templateId || channels.length === 0 || !scheduleDateTime) return;
+    setError(null);
+    setSuccess(null);
+    setScheduling(true);
+    try {
+      const scheduledTimestamp = new Date(scheduleDateTime).getTime();
+      const now = Date.now();
+      
+      if (scheduledTimestamp <= now) {
+        setError("Scheduled time must be in the future");
+        setScheduling(false);
+        return;
+      }
+
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/messages/schedule", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          templateId,
+          eventId: eventId || undefined,
+          audienceType,
+          audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
+          channels,
+          scheduledAt: scheduledTimestamp,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errorMsg = data.error || data.message || "Failed to schedule message";
+        setError(errorMsg);
+        return;
+      }
+      if (data.ok) {
+        const scheduledDate = new Date(scheduledTimestamp).toLocaleString();
+        setSuccess({
+          message: `Message scheduled for ${scheduledDate}`,
+          sent: 0,
+          failed: 0,
+          recipientCount: recipients.length,
+        });
+        setShowScheduleForm(false);
+        setScheduleDateTime("");
+      } else {
+        setError(data.message || "Failed to schedule message");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to schedule message");
+    } finally {
+      setScheduling(false);
     }
   };
 
@@ -268,22 +349,74 @@ export default function MessagesPage() {
               )}
             </div>
           )}
-          <button
-            type="button"
-            onClick={send}
-            disabled={sending || !templateId || channels.length === 0}
-            className="w-full rounded-lg bg-amber-600 py-2.5 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-          >
-            {sending ? "Sending..." : "Send"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={send}
+              disabled={sending || scheduling || !templateId || channels.length === 0}
+              className="flex-1 rounded-lg bg-amber-600 py-2.5 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {sending ? "Sending..." : "Send"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowScheduleForm(!showScheduleForm)}
+              disabled={sending || scheduling || !templateId || channels.length === 0}
+              className="flex-1 rounded-lg border-2 border-amber-600 bg-white py-2.5 font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-500 dark:bg-stone-800 dark:text-amber-400 dark:hover:bg-stone-700"
+            >
+              Schedule Send
+            </button>
+          </div>
+          {showScheduleForm && (
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-600 dark:bg-stone-900/30">
+              <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                Schedule Date & Time
+              </label>
+              <input
+                type="datetime-local"
+                value={scheduleDateTime}
+                onChange={(e) => setScheduleDateTime(e.target.value)}
+                min={new Date().toISOString().slice(0, 16)}
+                className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={scheduleSend}
+                  disabled={scheduling || !scheduleDateTime}
+                  className="flex-1 rounded-lg bg-amber-600 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {scheduling ? "Scheduling..." : "Confirm Schedule"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowScheduleForm(false);
+                    setScheduleDateTime("");
+                  }}
+                  className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {success && (
-            <div className="rounded-lg bg-green-50 p-3 text-sm dark:bg-green-900/20">
-              <p className="font-medium text-green-800 dark:text-green-200">✓ Message sent successfully!</p>
-              <p className="mt-1 text-green-700 dark:text-green-300">{success.message}</p>
-              <div className="mt-2 space-y-1 text-xs text-green-600 dark:text-green-400">
+            <div className={`rounded-lg p-3 text-sm ${success.failed > 0 ? "bg-amber-50 dark:bg-amber-900/20" : "bg-green-50 dark:bg-green-900/20"}`}>
+              <p className={`font-medium ${success.failed > 0 ? "text-amber-800 dark:text-amber-200" : "text-green-800 dark:text-green-200"}`}>
+                {success.failed > 0 ? "⚠ Partial success" : "✓ Message sent successfully!"}
+              </p>
+              <p className={`mt-1 ${success.failed > 0 ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
+                {success.message}
+              </p>
+              <div className={`mt-2 space-y-1 text-xs ${success.failed > 0 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
                 <p>Recipients: {success.recipientCount}</p>
                 <p>Sent: {success.sent}</p>
-                {success.failed > 0 && <p className="text-amber-600 dark:text-amber-400">Failed: {success.failed}</p>}
+                {success.failed > 0 && (
+                  <p className="font-medium text-red-600 dark:text-red-400">
+                    Failed: {success.failed} {success.recipientCount > 0 ? `(${Math.round((success.failed / success.recipientCount) * 100)}%)` : ""}
+                  </p>
+                )}
               </div>
             </div>
           )}

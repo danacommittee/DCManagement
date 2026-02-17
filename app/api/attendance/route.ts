@@ -71,25 +71,44 @@ export async function GET(req: NextRequest) {
     if (expandMembers && teamId) {
       const teamSnap = await db.collection("teams").doc(teamId).get();
       if (!teamSnap.exists) return NextResponse.json({ error: "Team not found" }, { status: 400 });
+      const teamData = teamSnap.data();
       if (myRole === "admin") {
-        const t = teamSnap.data();
-        if (t?.leaderId !== myId && t?.leader2Id !== myId) {
+        if (teamData?.leaderId !== myId && teamData?.leader2Id !== myId) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
       }
 
+      // Base members + leaders from team document
+      let memberIds: string[] = Array.isArray(teamData?.memberIds) ? (teamData!.memberIds as string[]) : [];
+      let leaderIds: string[] = [];
+      if (teamData?.leaderId) leaderIds.push(String(teamData.leaderId));
+      if (teamData?.leader2Id) leaderIds.push(String(teamData.leader2Id));
+
       // If this attendance request is for a specific event, use per-event overrides (if any).
-      let memberIds = (teamSnap.data()?.memberIds as string[]) || [];
       if (eventId) {
         const eventSnap = await db.collection("events").doc(eventId).get();
         if (eventSnap.exists) {
           const ev = eventSnap.data()!;
-          const override = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined)?.[teamId];
-          if (Array.isArray(override?.memberIds)) {
-            memberIds = override!.memberIds!;
+          const override = (ev.teamOverrides as Record<string, { memberIds?: string[]; leaderId?: string; leader2Id?: string }> | undefined)?.[teamId];
+          if (override) {
+            if (Array.isArray(override.memberIds)) {
+              memberIds = override.memberIds;
+            }
+            if (override.leaderId) {
+              leaderIds[0] = String(override.leaderId);
+            }
+            if (override.leader2Id) {
+              if (leaderIds.length === 0) leaderIds.push(String(override.leader2Id));
+              else if (leaderIds.length === 1) leaderIds.push(String(override.leader2Id));
+              else leaderIds[1] = String(override.leader2Id);
+            }
           }
         }
       }
+
+      // Build full list: members + leaders (deduped)
+      const allIdsSet = new Set<string>([...memberIds, ...leaderIds]);
+      const allIds = Array.from(allIdsSet);
 
       const membersSnap2 = await db.collection("members").get();
       const membersMap = new Map<string, string>();
@@ -98,7 +117,7 @@ export async function GET(req: NextRequest) {
         const name = [x.title, x.firstName, x.lastName].filter(Boolean).join(" ") || x.name || x.email || d.id;
         membersMap.set(d.id, name);
       });
-      const members = memberIds.map((id) => ({ id, name: membersMap.get(id) || id }));
+      const members = allIds.map((id) => ({ id, name: membersMap.get(id) || id }));
       const rec = records[0];
       const record = rec
         ? {

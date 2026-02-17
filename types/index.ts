@@ -1,7 +1,7 @@
 export type Role = "member" | "admin" | "super_admin";
 
-/** Title: Mulla, Shaikh, bhai, bhen */
-export type MemberTitle = "Mulla" | "Shaikh" | "bhai" | "bhen" | "";
+/** Title: Mulla, Shaikh, Bhai, Bhen */
+export type MemberTitle = "Mulla" | "Shaikh" | "Bhai" | "Bhen" | "";
 
 export interface Member {
   id: string;

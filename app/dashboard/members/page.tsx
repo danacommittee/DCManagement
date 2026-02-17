@@ -8,7 +8,7 @@ import { getAuthHeaders } from "@/lib/api";
 import type { Member } from "@/types";
 import type { Role } from "@/types";
 
-const TITLES = ["", "Mulla", "Shaikh", "bhai", "bhen"];
+const TITLES = ["", "Mulla", "Shaikh", "Bhai", "Bhen"];
 
 export default function MembersPage() {
   const { profile, signOut } = useAuth();

@@ -8,6 +8,7 @@ import { getAuthHeaders } from "@/lib/api";
 import { getDatesInRange, today } from "@/lib/dates";
 import type { Team } from "@/types";
 import type { Event } from "@/types";
+import type { Member } from "@/types";
 
 
 export default function AttendancePage() {
@@ -19,6 +20,7 @@ export default function AttendancePage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState("");
@@ -47,13 +49,26 @@ export default function AttendancePage() {
       : [];
   const teamsForDropdown = canManageAttendance ? (selectedEventId ? teamsInEvent : teams) : [];
 
+  const selectedTeam =
+    selectedTeamId && teams.length > 0 ? teams.find((t) => t.id === selectedTeamId) ?? null : null;
+  const leaderNames =
+    selectedTeam && allMembers.length > 0
+      ? [selectedTeam.leaderId, selectedTeam.leader2Id]
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+          .map((id) => {
+            const m = allMembers.find((mem) => mem.id === id);
+            return m?.name ?? id;
+          })
+      : [];
+
   useEffect(() => {
     if (!profile) return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const [teamsRes, eventsRes] = await Promise.all([
+      const [teamsRes, eventsRes, membersRes] = await Promise.all([
         fetch("/api/teams", { headers }),
         fetch("/api/events?limit=100", { headers }),
+        fetch("/api/members", { headers }),
       ]);
       if (teamsRes.ok) {
         const d = await teamsRes.json();
@@ -62,6 +77,10 @@ export default function AttendancePage() {
       if (eventsRes?.ok) {
         const d = await eventsRes.json();
         setEvents(d.events ?? []);
+      }
+      if (membersRes?.ok) {
+        const d = await membersRes.json();
+        setAllMembers(d.members ?? []);
       }
       setLoading(false);
     };
@@ -253,6 +272,11 @@ export default function AttendancePage() {
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
+                {selectedTeam && leaderNames.length > 0 && (
+                  <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                    Leads: {leaderNames.join(", ")}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date (today or past only)</label>

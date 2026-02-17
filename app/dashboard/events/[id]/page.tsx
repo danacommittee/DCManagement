@@ -29,9 +29,8 @@ export default function EventDetailPage() {
   const [event, setEvent] = useState<EventWithTeams | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [overallStartTime, setOverallStartTime] = useState("");
-  const [overallEndTime, setOverallEndTime] = useState("");
-  const [savingOverall, setSavingOverall] = useState(false);
+  const [dailyTimes, setDailyTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
+  const [savingDailyTimes, setSavingDailyTimes] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", dateFrom: "", dateTo: "", teamIds: [] as string[] });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -41,8 +40,9 @@ export default function EventDetailPage() {
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
 
   const isSuperAdmin = profile?.role === "super_admin";
-  const eventEndDate = event?.dateTo?.slice(0, 10) ?? "";
-  const canSetOverallTime = isSuperAdmin && eventEndDate && eventEndDate <= today();
+  const eventStartDate = event?.dateFrom?.slice(0, 10) ?? "";
+  // Allow setting overall time once the event has started (today or any past day), but not before it begins.
+  const canSetOverallTime = isSuperAdmin && eventStartDate && eventStartDate <= today();
 
   const fetchEvent = async () => {
     if (!id) return;
@@ -52,10 +52,23 @@ export default function EventDetailPage() {
       const d = await res.json();
       const ev = d?.event ?? null;
       setEvent(ev);
-      const s = ev?.overallStartTime ?? "";
-      const e = ev?.overallEndTime ?? "";
-      setOverallStartTime(s ? s.slice(0, 16) : "");
-      setOverallEndTime(e ? e.slice(0, 16) : "");
+      if (ev) {
+        const dt = ev?.dailyTimes ?? {};
+        const eventDates = getDatesInRange(ev.dateFrom, ev.dateTo);
+        const allowedDates = eventDates.filter((d) => d <= today());
+        const initialized: Record<string, { startTime: string; endTime: string }> = {};
+        for (const dateStr of allowedDates) {
+          initialized[dateStr] = dt[dateStr] ?? { startTime: "", endTime: "" };
+        }
+        for (const [dateStr, times] of Object.entries(dt)) {
+          if (!initialized[dateStr]) {
+            initialized[dateStr] = times as { startTime: string; endTime: string };
+          }
+        }
+        setDailyTimes(initialized);
+      } else {
+        setDailyTimes({});
+      }
     }
   };
 
@@ -73,10 +86,25 @@ export default function EventDetailPage() {
         const d = await eventRes.json();
         const ev = d?.event ?? null;
         setEvent(ev);
-        const s = ev?.overallStartTime ?? "";
-        const e = ev?.overallEndTime ?? "";
-        setOverallStartTime(s ? s.slice(0, 16) : "");
-        setOverallEndTime(e ? e.slice(0, 16) : "");
+        if (ev) {
+          const dt = ev?.dailyTimes ?? {};
+          // Initialize empty entries for all allowed dates so inputs show up
+          const eventDates = getDatesInRange(ev.dateFrom, ev.dateTo);
+          const allowedDates = eventDates.filter((d) => d <= today());
+          const initialized: Record<string, { startTime: string; endTime: string }> = {};
+          for (const dateStr of allowedDates) {
+            initialized[dateStr] = dt[dateStr] ?? { startTime: "", endTime: "" };
+          }
+          // Also keep any existing entries for dates outside allowed range (in case event was edited)
+          for (const [dateStr, times] of Object.entries(dt)) {
+            if (!initialized[dateStr]) {
+              initialized[dateStr] = times as { startTime: string; endTime: string };
+            }
+          }
+          setDailyTimes(initialized);
+        } else {
+          setDailyTimes({});
+        }
         if (ev && editing) {
           setEditForm({
             name: ev.name,
@@ -110,23 +138,32 @@ export default function EventDetailPage() {
     }
   }, [event, editing]);
 
-  const saveOverallTime = async () => {
+  const saveDailyTimes = async () => {
     if (!id || !canSetOverallTime) return;
-    setSavingOverall(true);
+    setSavingDailyTimes(true);
     try {
       const headers = await getAuthHeaders();
       const res = await fetch(`/api/events/${id}`, {
         method: "PATCH",
         headers,
         body: JSON.stringify({
-          overallStartTime: overallStartTime.trim() || null,
-          overallEndTime: overallEndTime.trim() || null,
+          dailyTimes: dailyTimes,
         }),
       });
       if (res.ok) await fetchEvent();
     } finally {
-      setSavingOverall(false);
+      setSavingDailyTimes(false);
     }
+  };
+
+  const updateDayTime = (date: string, field: "startTime" | "endTime", value: string) => {
+    setDailyTimes((prev) => ({
+      ...prev,
+      [date]: {
+        ...prev[date],
+        [field]: value,
+      },
+    }));
   };
 
   const saveEdit = async () => {
@@ -204,6 +241,8 @@ export default function EventDetailPage() {
 
   const eventDates = event ? getDatesInRange(event.dateFrom, event.dateTo) : [];
   const allowedDates = eventDates.filter((d) => d <= today());
+  const isSingleDay = eventDates.length === 1;
+  const singleDayDate = isSingleDay ? eventDates[0] : null;
 
   if (loading) return <p className="text-stone-500">Loading…</p>;
   if (!event) return <p className="text-stone-500">Event not found.</p>;
@@ -233,18 +272,24 @@ export default function EventDetailPage() {
                 className="w-full max-w-md rounded border border-stone-300 px-3 py-2 text-lg font-semibold dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
               <div className="flex gap-4">
-                <input
-                  type="datetime-local"
-                  value={editForm.dateFrom}
-                  onChange={(e) => setEditForm((f) => ({ ...f, dateFrom: e.target.value }))}
-                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                />
-                <input
-                  type="datetime-local"
-                  value={editForm.dateTo}
-                  onChange={(e) => setEditForm((f) => ({ ...f, dateTo: e.target.value }))}
-                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                />
+                <div>
+                  <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">From (date)</label>
+                  <input
+                    type="date"
+                    value={editForm.dateFrom ? editForm.dateFrom.slice(0, 10) : ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, dateFrom: e.target.value ? e.target.value + "T00:00:00" : "" }))}
+                    className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">To (date)</label>
+                  <input
+                    type="date"
+                    value={editForm.dateTo ? editForm.dateTo.slice(0, 10) : ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, dateTo: e.target.value ? e.target.value + "T23:59:59" : "" }))}
+                    className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {teams.map((t) => (
@@ -308,38 +353,85 @@ export default function EventDetailPage() {
 
       {canSetOverallTime && !editing && (
         <div className="mb-6 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
-          <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Overall event time (Super Admin)</h2>
+          <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Event times (Super Admin)</h2>
           <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">
-            Track how long the full event took from start to end.
+            {isSingleDay
+              ? "Enter start and end time for this event day."
+              : "Enter start and end time for each day (today and past days only)."}
           </p>
-          <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
-              <input
-                type="datetime-local"
-                value={overallStartTime}
-                onChange={(e) => setOverallStartTime(e.target.value)}
-                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-              />
+          {isSingleDay && singleDayDate ? (
+            <div className="flex flex-wrap items-end gap-4">
+              <div>
+                <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
+                <input
+                  type="time"
+                  value={dailyTimes[singleDayDate]?.startTime ?? ""}
+                  onChange={(e) => updateDayTime(singleDayDate, "startTime", e.target.value)}
+                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
+                <input
+                  type="time"
+                  value={dailyTimes[singleDayDate]?.endTime ?? ""}
+                  onChange={(e) => updateDayTime(singleDayDate, "endTime", e.target.value)}
+                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={saveDailyTimes}
+                disabled={savingDailyTimes}
+                className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {savingDailyTimes ? "Saving…" : "Save"}
+              </button>
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
-              <input
-                type="datetime-local"
-                value={overallEndTime}
-                onChange={(e) => setOverallEndTime(e.target.value)}
-                className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-              />
+          ) : (
+            <div className="space-y-4">
+              {allowedDates.map((dateStr) => {
+                const dayData = dailyTimes[dateStr] ?? { startTime: "", endTime: "" };
+                const dateObj = new Date(dateStr + "T00:00:00");
+                const dateLabel = dateObj.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+                return (
+                  <div key={dateStr} className="rounded border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-900/30">
+                    <h3 className="mb-2 text-sm font-medium text-stone-900 dark:text-white">{dateLabel}</h3>
+                    <div className="flex flex-wrap items-end gap-4">
+                      <div>
+                        <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
+                        <input
+                          type="time"
+                          value={dayData.startTime ?? ""}
+                          onChange={(e) => updateDayTime(dateStr, "startTime", e.target.value)}
+                          className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
+                        <input
+                          type="time"
+                          value={dayData.endTime ?? ""}
+                          onChange={(e) => updateDayTime(dateStr, "endTime", e.target.value)}
+                          className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {allowedDates.length > 0 && (
+                <button
+                  type="button"
+                  onClick={saveDailyTimes}
+                  disabled={savingDailyTimes}
+                  className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {savingDailyTimes ? "Saving…" : "Save all times"}
+                </button>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={saveOverallTime}
-              disabled={savingOverall}
-              className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              {savingOverall ? "Saving…" : "Save"}
-            </button>
-          </div>
+          )}
         </div>
       )}
 

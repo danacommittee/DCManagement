@@ -116,6 +116,15 @@ export default function MembersPage() {
   };
 
   const submitAdd = async () => {
+    const hasName = (addForm.firstName || "").trim() || (addForm.lastName || "").trim();
+    if (!hasName) {
+      setAddError("First name or last name is required");
+      return;
+    }
+    if (!(addForm.phone || "").trim()) {
+      setAddError("Phone number is required");
+      return;
+    }
     if (!addForm.email.trim()) {
       setAddError("Email is required");
       return;
@@ -333,21 +342,23 @@ export default function MembersPage() {
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">First name</label>
+              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">First name *</label>
               <input
                 type="text"
                 value={addForm.firstName}
                 onChange={(e) => setAddForm((f) => ({ ...f, firstName: e.target.value }))}
                 className="w-full rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                required
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">Last name</label>
+              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">Last name *</label>
               <input
                 type="text"
                 value={addForm.lastName}
                 onChange={(e) => setAddForm((f) => ({ ...f, lastName: e.target.value }))}
                 className="w-full rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                required
               />
             </div>
             <div>
@@ -360,13 +371,14 @@ export default function MembersPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">Phone</label>
+              <label className="mb-1 block text-xs font-medium text-stone-500 dark:text-stone-400">Phone *</label>
               <input
                 type="text"
                 value={addForm.phone}
                 onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))}
                 placeholder="e.g. 1 (832) 309-5252"
                 className="w-full rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                required
               />
             </div>
             <div>
@@ -376,6 +388,7 @@ export default function MembersPage() {
                 value={addForm.email}
                 onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))}
                 className="w-full rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                required
               />
             </div>
             <div>

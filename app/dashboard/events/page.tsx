@@ -326,20 +326,20 @@ export default function EventsPage() {
             </div>
             <div />
             <div>
-              <label className="mb-1 block text-sm text-stone-600 dark:text-stone-400">From (date & time)</label>
+              <label className="mb-1 block text-sm text-stone-600 dark:text-stone-400">From (date)</label>
               <input
-                type="datetime-local"
-                value={form.dateFrom}
-                onChange={(e) => setForm((f) => ({ ...f, dateFrom: e.target.value }))}
+                type="date"
+                value={form.dateFrom ? form.dateFrom.slice(0, 10) : ""}
+                onChange={(e) => setForm((f) => ({ ...f, dateFrom: e.target.value ? e.target.value + "T00:00:00" : "" }))}
                 className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm text-stone-600 dark:text-stone-400">To (date & time)</label>
+              <label className="mb-1 block text-sm text-stone-600 dark:text-stone-400">To (date)</label>
               <input
-                type="datetime-local"
-                value={form.dateTo}
-                onChange={(e) => setForm((f) => ({ ...f, dateTo: e.target.value }))}
+                type="date"
+                value={form.dateTo ? form.dateTo.slice(0, 10) : ""}
+                onChange={(e) => setForm((f) => ({ ...f, dateTo: e.target.value ? e.target.value + "T23:59:59" : "" }))}
                 className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
             </div>

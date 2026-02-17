@@ -136,38 +136,6 @@ export default function TemplatesPage() {
           >
             {showForm ? "Cancel" : "Add template"}
           </button>
-          {canEdit && !showForm && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(true);
-                  setName("Event welcome message");
-                  setCategory("special_event");
-                  setBody(
-                    "Dear {{Name}},\n\nWelcome to {{EventName}}.\n\nYou are in team {{TeamName}}.\nYour team members: {{TeamMembers}}.\nYour team leader(s): {{TeamLeaders}}.\n\nWarm regards,\n{{YourName}}"
-                  );
-                }}
-                className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
-              >
-                Quick create event welcome template
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(true);
-                  setName("Reminder – all my teams");
-                  setCategory("custom");
-                  setBody(
-                    "Hi {{Name}},\n\nReminder for {{EventName}}.\n\nYou are in the following teams and members:\n\n{{TeamsList}}\n\nIf you have questions, contact {{YourName}}."
-                  );
-                }}
-                className="ml-3 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-900/20"
-              >
-                Quick create multi-team reminder
-              </button>
-            </>
-          )}
           {showForm && (
             <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
               <input

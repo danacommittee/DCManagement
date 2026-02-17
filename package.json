@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "generate-pwa-icons": "node scripts/generate-pwa-icons.cjs"
+    "generate-pwa-icons": "node scripts/generate-pwa-icons.cjs",
+    "guide:pdf": "md-to-pdf docs/SUPER-ADMIN-GUIDE.md --dest docs/SUPER-ADMIN-GUIDE.pdf"
   },
   "dependencies": {
     "firebase": "^11.0.2",
@@ -19,6 +20,7 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "md-to-pdf": "^5.2.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/nodemailer": "^6.4.16",

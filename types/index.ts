@@ -43,9 +43,8 @@ export interface Event {
   teamIds: string[];
   /** Per-team overrides for this event only: memberIds and/or leaders */
   teamOverrides?: Record<string, { memberIds?: string[]; leaderId?: string; leader2Id?: string }>;
-  /** Overall event duration (super admin only) */
-  overallStartTime?: string;
-  overallEndTime?: string;
+  /** Per-day start/end times (super admin only). Key is date YYYY-MM-DD, value has startTime/endTime as HH:mm strings */
+  dailyTimes?: Record<string, { startTime?: string; endTime?: string }>;
   createdBy?: string;
   createdAt: number;
   updatedAt: number;

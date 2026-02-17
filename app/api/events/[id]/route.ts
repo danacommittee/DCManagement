@@ -25,8 +25,7 @@ export async function GET(
       dateTo: x.dateTo,
       teamIds: Array.isArray(x.teamIds) ? x.teamIds : [],
       teamOverrides: x.teamOverrides != null ? x.teamOverrides : undefined,
-      overallStartTime: x.overallStartTime,
-      overallEndTime: x.overallEndTime,
+      dailyTimes: x.dailyTimes != null ? x.dailyTimes : undefined,
       createdBy: x.createdBy,
       createdAt: x.createdAt,
       updatedAt: x.updatedAt,
@@ -82,15 +81,28 @@ export async function PATCH(
     if (typeof body.dateTo === "string") updates.dateTo = body.dateTo.trim();
     if (Array.isArray(body.teamIds)) updates.teamIds = body.teamIds;
     if (body.teamOverrides !== undefined) updates.teamOverrides = body.teamOverrides;
-    if (typeof body.overallStartTime === "string" || typeof body.overallEndTime === "string") {
+    if (body.dailyTimes !== undefined) {
       const evData = snap.data()!;
+      const eventStartDate = (evData.dateFrom as string).slice(0, 10);
       const eventEndDate = (evData.dateTo as string).slice(0, 10);
-      const today = new Date().toISOString().slice(0, 10);
-      if (eventEndDate > today) {
-        return NextResponse.json({ error: "Cannot set overall event time for future events" }, { status: 403 });
+      const todayStr = new Date().toISOString().slice(0, 10);
+      // Only allow setting daily times on or after the event start date (no future events).
+      if (todayStr < eventStartDate) {
+        return NextResponse.json({ error: "Cannot set event times before the event starts" }, { status: 403 });
       }
-      if (typeof body.overallStartTime === "string") updates.overallStartTime = body.overallStartTime.trim() || null;
-      if (typeof body.overallEndTime === "string") updates.overallEndTime = body.overallEndTime.trim() || null;
+      // Validate: all dates in dailyTimes must be within event range and not future
+      const dailyTimes = body.dailyTimes as Record<string, { startTime?: string; endTime?: string }>;
+      if (typeof dailyTimes === "object" && dailyTimes !== null) {
+        for (const dateStr of Object.keys(dailyTimes)) {
+          if (dateStr < eventStartDate || dateStr > eventEndDate) {
+            return NextResponse.json({ error: `Date ${dateStr} is outside event range` }, { status: 400 });
+          }
+          if (dateStr > todayStr) {
+            return NextResponse.json({ error: `Cannot set times for future date ${dateStr}` }, { status: 403 });
+          }
+        }
+        updates.dailyTimes = dailyTimes;
+      }
     }
 
     await db.collection("events").doc(id).update(updates);

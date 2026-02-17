@@ -57,14 +57,19 @@ export async function POST(req: NextRequest) {
     const emailVal = (body.email as string)?.toLowerCase()?.trim();
     if (!emailVal) return NextResponse.json({ error: "email required" }, { status: 400 });
 
+    const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
+    const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+    const hasName = firstName !== "" || lastName !== "";
+    if (!hasName) return NextResponse.json({ error: "First name or last name is required" }, { status: 400 });
+
+    const phoneVal = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!phoneVal) return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
+
     const existing = await db.collection("members").where("email", "==", emailVal).limit(1).get();
     if (!existing.empty) return NextResponse.json({ error: "A member with this email already exists" }, { status: 400 });
 
     const title = typeof body.title === "string" ? body.title.trim() : "";
-    const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
-    const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
     const itsNumber = typeof body.itsNumber === "string" ? body.itsNumber.trim() : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     let role: "member" | "admin" | "super_admin" = "member";
     if (typeof body.role === "string" && ["member", "admin", "super_admin"].includes(body.role)) role = body.role;
 
@@ -75,7 +80,7 @@ export async function POST(req: NextRequest) {
       firstName,
       lastName,
       itsNumber,
-      phone,
+      phone: phoneVal,
       email: emailVal,
       role,
       name,

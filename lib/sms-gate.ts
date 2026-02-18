@@ -1,7 +1,7 @@
 /**
  * SMS Gate (sms-gate.app) API client.
  * Sends SMS via POST https://api.sms-gate.app/3rdparty/v1/message
- * with Basic auth and JSON body: { message, phoneNumbers }.
+ * with Basic auth and JSON body: { textMessage: { text }, phoneNumbers, simNumber: 2 }.
  * Phone numbers are normalized to E.164 (e.g. +19162255887).
  */
 
@@ -49,8 +49,9 @@ export async function sendSmsGate(options: SmsGateSendOptions): Promise<SmsGateS
   }
 
   const body = JSON.stringify({
-    message: options.message,
+    textMessage: { text: options.message },
     phoneNumbers: normalized,
+    simNumber: 2,
   });
 
   const auth = Buffer.from(`${username}:${password}`).toString("base64");

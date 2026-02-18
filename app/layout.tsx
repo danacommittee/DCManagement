@@ -23,7 +23,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Dana Committee Management System",
-  description: "Volunteer operations during Shahr-e-Lillah al-Muazzam and year-round management",
+  description: "Volunteer operations during Shehrullah and year-round management",
   manifest: "/manifest.json",
   icons: {
     icon: "/logo.png",

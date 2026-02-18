@@ -1,7 +1,7 @@
 {
   "name": "Dana Committee Management System",
   "short_name": "DCMS",
-  "description": "Volunteer operations during Shahr-e-Lillah al-Muazzam and year-round management",
+  "description": "Volunteer operations during Shehrullah and year-round management",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",

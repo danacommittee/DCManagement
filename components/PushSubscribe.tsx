@@ -1,19 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getAuthHeaders } from "@/lib/api";
+
+const PUSH_DENIED_KEY = "dcms_push_denied";
 
 export function PushSubscribe() {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "unsupported" | "denied">("idle");
   const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
-      setStatus("unsupported");
-      return;
-    }
-    if (Notification.permission === "denied") setStatus("denied");
-  }, []);
+  const hasAutoRun = useRef(false);
 
   const subscribe = async () => {
     if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
@@ -30,6 +25,11 @@ export function PushSubscribe() {
       if (permission !== "granted") {
         setStatus("denied");
         setMessage("Permission denied");
+        try {
+          localStorage.setItem(PUSH_DENIED_KEY, "1");
+        } catch {
+          // ignore
+        }
         return;
       }
 
@@ -81,31 +81,65 @@ export function PushSubscribe() {
     }
   };
 
+  // Auto-run subscription once on first visit (permission default or already granted)
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
+      setStatus("unsupported");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setStatus("denied");
+      return;
+    }
+    try {
+      if (Notification.permission === "default" && localStorage.getItem(PUSH_DENIED_KEY)) {
+        setStatus("denied");
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    if (hasAutoRun.current) return;
+    hasAutoRun.current = true;
+    const timer = setTimeout(() => {
+      subscribe();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
   if (status === "unsupported") return null;
   if (status === "denied") {
     return (
-      <p className="text-xs text-stone-500 dark:text-stone-400">
-        Notifications blocked. Enable them in browser settings to get reminders.
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-stone-500 dark:text-stone-400">
+          Notifications blocked. Enable them in browser settings to get reminders.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              localStorage.removeItem(PUSH_DENIED_KEY);
+            } catch {
+              // ignore
+            }
+            setStatus("idle");
+            setMessage(null);
+            subscribe();
+          }}
+          className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
+        >
+          Try again
+        </button>
+      </div>
     );
   }
   if (status === "done") {
     return <p className="text-xs text-green-600 dark:text-green-400">{message}</p>;
   }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={subscribe}
-        disabled={status === "loading"}
-        className="text-xs font-medium text-amber-600 hover:underline disabled:opacity-50 dark:text-amber-400"
-      >
-        {status === "loading" ? "Enabling…" : "Enable 8 AM attendance reminders"}
-      </button>
-      {message && <span className="text-xs text-red-600 dark:text-red-400">{message}</span>}
-    </div>
-  );
+  if (status === "loading") {
+    return <p className="text-xs text-stone-500 dark:text-stone-400">Enabling notifications…</p>;
+  }
+  return null;
 }
 
 function urlBase64ToUint8Array(base64String: string): BufferSource {

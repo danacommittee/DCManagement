@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { auth } from "@/lib/firebase";
 import { getAuthHeaders } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { Member } from "@/types";
 import type { Role } from "@/types";
 
@@ -33,7 +34,7 @@ export default function MembersPage() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"name-asc" | "name-desc" | "role">("name-asc");
 
@@ -235,13 +236,18 @@ export default function MembersPage() {
   };
 
   const deleteAll = async () => {
-    if (!canManage || !deleteAllConfirm) return;
+    if (!canManage) return;
+    setShowDeleteAllConfirm(true);
+  };
+
+  const confirmDeleteAll = async () => {
+    if (!canManage) return;
+    setShowDeleteAllConfirm(false);
     try {
       const headers = await getAuthHeaders();
       await fetch("/api/members/delete-all", { method: "POST", headers });
       await fetchMembers();
       setSelectedIds(new Set());
-      setDeleteAllConfirm(false);
     } catch (e) {
       console.error(e);
     }
@@ -308,20 +314,11 @@ export default function MembersPage() {
           )}
           <button
             type="button"
-            onClick={() => setDeleteAllConfirm(!deleteAllConfirm)}
+            onClick={deleteAll}
             className="rounded-lg border border-red-400 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
           >
-            {deleteAllConfirm ? "Cancel delete all" : "Delete all members"}
+            Delete all members
           </button>
-          {deleteAllConfirm && (
-            <button
-              type="button"
-              onClick={deleteAll}
-              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-            >
-              Confirm: delete every member
-            </button>
-          )}
         </div>
       )}
 
@@ -597,6 +594,17 @@ export default function MembersPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={showDeleteAllConfirm}
+        title="Delete All Members"
+        message="Are you sure you want to delete ALL members? This action cannot be undone and will remove all member data from the system."
+        confirmLabel="Delete All"
+        cancelLabel="Cancel"
+        onConfirm={confirmDeleteAll}
+        onCancel={() => setShowDeleteAllConfirm(false)}
+        variant="danger"
+      />
     </div>
   );
 }

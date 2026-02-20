@@ -13,23 +13,70 @@ export async function GET(req: NextRequest) {
     const myRole = membersSnap.docs[0].data().role;
     const myId = membersSnap.docs[0].id;
 
-    const [membersSnap2, teamsSnap, attendanceSnap, messagesSnap] = await Promise.all([
+    const [membersSnap2, teamsSnap, attendanceSnap, messagesSnap, eventsSnap, templatesSnap] = await Promise.all([
       db.collection("members").get(),
       db.collection("teams").get(),
       db.collection("attendance").orderBy("date", "desc").limit(100).get(),
       db.collection("messages").orderBy("sentAt", "desc").limit(10).get(),
+      db.collection("events").get(),
+      db.collection("templates").get(),
     ]);
+
+    const memberNameById = new Map<string, string>();
+    membersSnap2.docs.forEach((doc) => {
+      const d = doc.data();
+      const name = (d.name as string) || [d.title, d.firstName, d.lastName].filter(Boolean).join(" ") || doc.id;
+      memberNameById.set(doc.id, name);
+    });
+    const teamNameById = new Map<string, string>();
+    teamsSnap.docs.forEach((doc) => {
+      teamNameById.set(doc.id, (doc.data().name as string) || doc.id);
+    });
+    const eventNameById = new Map<string, string>();
+    eventsSnap.docs.forEach((doc) => {
+      eventNameById.set(doc.id, (doc.data().name as string) || doc.id);
+    });
+    const templateNameById = new Map<string, string>();
+    templatesSnap.docs.forEach((doc) => {
+      templateNameById.set(doc.id, (doc.data().name as string) || doc.id);
+    });
 
     let totalMembers = membersSnap2.size;
     let totalTeams = teamsSnap.size;
     let attendanceRate: number | null = null;
     const recentAttendance = attendanceSnap.docs.slice(0, 5).map((d) => {
       const x = d.data();
-      return { id: d.id, teamId: x.teamId, date: x.date, submittedBy: x.submittedBy };
+      const teamId = x.teamId as string;
+      const eventId = x.eventId as string | undefined;
+      const presentIds = (x.presentIds as string[]) || [];
+      const absentIds = (x.absentIds as string[]) || [];
+      return {
+        id: d.id,
+        teamId,
+        teamName: teamNameById.get(teamId) ?? "Team",
+        date: x.date as string,
+        submittedBy: x.submittedBy as string,
+        submittedByName: memberNameById.get(x.submittedBy as string) ?? undefined,
+        presentCount: presentIds.length,
+        absentCount: absentIds.length,
+        eventId: eventId || undefined,
+        eventName: eventId ? eventNameById.get(eventId) : undefined,
+      };
     });
     const recentMessages = messagesSnap.docs.map((d) => {
       const x = d.data();
-      return { id: d.id, sentAt: x.sentAt, recipientCount: (x.recipientIds as string[]).length };
+      const templateId = x.templateId as string;
+      const channels = (x.channels as string[]) || [];
+      const createdBy = x.createdBy as string;
+      return {
+        id: d.id,
+        sentAt: x.sentAt as number,
+        recipientCount: (x.recipientIds as string[]).length,
+        templateName: templateNameById.get(templateId) ?? "Message",
+        channels,
+        createdBy,
+        createdByName: memberNameById.get(createdBy) ?? undefined,
+      };
     });
 
     if (myRole === "admin") {

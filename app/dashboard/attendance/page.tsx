@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import { getAuthHeaders } from "@/lib/api";
+import { Card, CardHeader } from "@/components/Card";
 import { getDatesInRange, today } from "@/lib/dates";
 import type { Team } from "@/types";
 import type { Event } from "@/types";
@@ -17,23 +19,28 @@ export default function AttendancePage() {
   const searchParams = useSearchParams();
   const urlEventId = searchParams.get("eventId") ?? "";
   const urlDate = searchParams.get("date") ?? "";
+  const urlTeamId = searchParams.get("teamId") ?? "";
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEventId, setSelectedEventId] = useState("");
-  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState(today());
-  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
-  const [record, setRecord] = useState<{ presentIds: string[]; absentIds: string[]; startTime?: string; endTime?: string; notes?: string } | null>(null);
-  const [choices, setChoices] = useState<{ id: string; present: boolean }[]>([]);
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [notes, setNotes] = useState("");
-  const [loadingRecord, setLoadingRecord] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  type PerTeamState = {
+    members: { id: string; name: string }[];
+    record: { presentIds: string[]; absentIds: string[]; startTime?: string; endTime?: string; notes?: string } | null;
+    choices: { id: string; present: boolean }[];
+    startTime: string;
+    endTime: string;
+    notes: string;
+    loading: boolean;
+  };
+  const [teamData, setTeamData] = useState<Record<string, PerTeamState>>({});
+  const [submittingTeamId, setSubmittingTeamId] = useState<string | null>(null);
+  const hasAppliedDefaultTeamsRef = useRef(false);
+  const { toast } = useToast();
 
   const isSuperAdmin = profile?.role === "super_admin";
   const isAdmin = profile?.role === "admin";
@@ -49,16 +56,11 @@ export default function AttendancePage() {
       : [];
   const teamsForDropdown = canManageAttendance ? (selectedEventId ? teamsInEvent : teams) : [];
 
-  const selectedTeam =
-    selectedTeamId && teams.length > 0 ? teams.find((t) => t.id === selectedTeamId) ?? null : null;
-  const leaderNames =
-    selectedTeam && allMembers.length > 0
-      ? [selectedTeam.leaderId, selectedTeam.leader2Id]
-          .filter((id): id is string => typeof id === "string" && id.length > 0)
-          .map((id) => {
-            const m = allMembers.find((mem) => mem.id === id);
-            return m?.name ?? id;
-          })
+  const leadTeamIds =
+    canManageAttendance && profile?.id && teams.length > 0
+      ? teams
+          .filter((t) => t.leaderId === profile.id || t.leader2Id === profile.id)
+          .map((t) => t.id)
       : [];
 
   useEffect(() => {
@@ -90,7 +92,8 @@ export default function AttendancePage() {
   useEffect(() => {
     if (canManageAttendance && urlEventId) setSelectedEventId(urlEventId);
     if (urlDate && urlDate <= today()) setSelectedDate(urlDate);
-  }, [urlEventId, urlDate, canManageAttendance]);
+    if (canManageAttendance && urlTeamId) setSelectedTeamIds([urlTeamId]);
+  }, [urlEventId, urlDate, urlTeamId, canManageAttendance]);
 
   useEffect(() => {
     if (selectedDate > today()) setSelectedDate(today());
@@ -108,101 +111,165 @@ export default function AttendancePage() {
         setSelectedEvent(d?.event ?? null);
         if (d?.event?.dateFrom && d?.event?.dateTo) {
           const dates = getDatesInRange(d.event.dateFrom, d.event.dateTo).filter((x) => x <= today());
-          setSelectedDate(dates.includes(today()) ? today() : dates[0] ?? today());
+          const preferredDate = urlDate && dates.includes(urlDate) ? urlDate : (dates.includes(today()) ? today() : dates[0] ?? today());
+          setSelectedDate(preferredDate);
         } else {
-          setSelectedDate(today());
+          setSelectedDate(urlDate && urlDate <= today() ? urlDate : today());
         }
       })
       .catch(() => setSelectedEvent(null));
-  }, [selectedEventId, canManageAttendance]);
+  }, [selectedEventId, canManageAttendance, urlDate]);
 
+  // Default to lead teams once per page load when no URL params (admin: teams they lead; super_admin: all teams)
+  const hasUrlParams = urlTeamId || urlEventId;
   useEffect(() => {
-    if (!canManageAttendance || !selectedTeamId || !selectedDate || selectedDate > today()) {
-      setMembers([]);
-      setRecord(null);
-      setChoices([]);
-      return;
-    }
-    setLoadingRecord(true);
-    const params = new URLSearchParams({
-      teamId: selectedTeamId,
-      date: selectedDate,
-      expand: "members",
-    });
-    if (selectedEventId) params.set("eventId", selectedEventId);
-    getAuthHeaders()
-      .then((headers) => fetch(`/api/attendance?${params}`, { headers }))
-      .then((res) => res.json())
-      .then((d) => {
-        setMembers(d.members ?? []);
-        const rec = d.record ?? null;
-        setRecord(rec);
-        setStartTime(rec?.startTime ?? "");
-        setEndTime(rec?.endTime ?? "");
-        setNotes(rec?.notes ?? "");
-        if (Array.isArray(d.members)) {
-          const presentIds = d.record?.presentIds ?? [];
-          setChoices(
-            d.members.map((m: { id: string }) => ({
-              id: m.id,
-              present: presentIds.includes(m.id),
-            }))
-          );
-        } else {
-          setChoices([]);
-        }
-      })
-      .catch(() => {
-        setMembers([]);
-        setRecord(null);
-        setChoices([]);
-      })
-      .finally(() => setLoadingRecord(false));
-  }, [canManageAttendance, selectedTeamId, selectedDate, selectedEventId]);
+    if (!canManageAttendance || hasUrlParams || teamsForDropdown.length === 0) return;
+    if (hasAppliedDefaultTeamsRef.current) return;
+    hasAppliedDefaultTeamsRef.current = true;
+    const defaultIds =
+      isAdmin && leadTeamIds.length > 0
+        ? leadTeamIds
+        : isSuperAdmin
+          ? teamsForDropdown.map((t) => t.id)
+          : [];
+    setSelectedTeamIds(defaultIds);
+  }, [canManageAttendance, isAdmin, isSuperAdmin, teamsForDropdown, leadTeamIds, hasUrlParams]);
 
-  const submitLeaderAttendance = async () => {
-    if (!selectedTeamId || !selectedDate || !profile) return;
-    if (selectedDate > today()) return; // Block future dates
-    setSubmitting(true);
-    setSaveMessage(null);
+  // Fetch attendance for each selected team
+  useEffect(() => {
+    if (!canManageAttendance || selectedDate > today()) return;
+    const toFetch = selectedTeamIds.filter((tid) => {
+      const cur = teamData[tid];
+      return !cur || cur.loading === false;
+    });
+    if (toFetch.length === 0) return;
+
+    toFetch.forEach((teamId) => {
+      setTeamData((prev) => ({
+        ...prev,
+        [teamId]: {
+          ...prev[teamId],
+          members: prev[teamId]?.members ?? [],
+          record: prev[teamId]?.record ?? null,
+          choices: prev[teamId]?.choices ?? [],
+          startTime: prev[teamId]?.startTime ?? "",
+          endTime: prev[teamId]?.endTime ?? "",
+          notes: prev[teamId]?.notes ?? "",
+          loading: true,
+        },
+      }));
+      const params = new URLSearchParams({ teamId, date: selectedDate, expand: "members" });
+      if (selectedEventId) params.set("eventId", selectedEventId);
+      getAuthHeaders()
+        .then((headers) => fetch(`/api/attendance?${params}`, { headers }))
+        .then((res) => res.json())
+        .then((d) => {
+          const members = d.members ?? [];
+          const rec = d.record ?? null;
+          const presentIds = rec?.presentIds ?? [];
+          setTeamData((prev) => ({
+            ...prev,
+            [teamId]: {
+              members,
+              record: rec,
+              choices: members.map((m: { id: string }) => ({ id: m.id, present: presentIds.includes(m.id) })),
+              startTime: rec?.startTime ?? "",
+              endTime: rec?.endTime ?? "",
+              notes: rec?.notes ?? "",
+              loading: false,
+            },
+          }));
+        })
+        .catch(() => {
+          setTeamData((prev) => ({
+            ...prev,
+            [teamId]: {
+              members: [],
+              record: null,
+              choices: [],
+              startTime: "",
+              endTime: "",
+              notes: "",
+              loading: false,
+            },
+          }));
+        });
+    });
+  }, [canManageAttendance, selectedTeamIds, selectedDate, selectedEventId]);
+
+  // Clear teamData for teams no longer selected
+  useEffect(() => {
+    setTeamData((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      Object.keys(next).forEach((tid) => {
+        if (!selectedTeamIds.includes(tid)) {
+          delete next[tid];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [selectedTeamIds]);
+
+  const updateTeamData = (teamId: string, updater: (prev: PerTeamState) => PerTeamState) => {
+    setTeamData((prev) => {
+      const cur = prev[teamId];
+      if (!cur) return prev;
+      return { ...prev, [teamId]: updater(cur) };
+    });
+  };
+
+  const submitLeaderAttendance = async (teamId: string) => {
+    const data = teamData[teamId];
+    if (!data || !selectedDate || !profile || selectedDate > today()) return;
+    setSubmittingTeamId(teamId);
     try {
       const headers = await getAuthHeaders();
-      const presentIds = choices.filter((c) => c.present).map((c) => c.id);
-      const absentIds = choices.filter((c) => !c.present).map((c) => c.id);
+      const presentIds = data.choices.filter((c) => c.present).map((c) => c.id);
+      const absentIds = data.choices.filter((c) => !c.present).map((c) => c.id);
       const res = await fetch("/api/attendance", {
         method: "POST",
         headers,
         body: JSON.stringify({
           ...(selectedEventId ? { eventId: selectedEventId } : {}),
-          teamId: selectedTeamId,
+          teamId,
           date: selectedDate,
           presentIds,
           absentIds,
-          startTime: startTime.trim() || undefined,
-          endTime: endTime.trim() || undefined,
-          notes: notes.trim() || undefined,
+          startTime: data.startTime.trim() || undefined,
+          endTime: data.endTime.trim() || undefined,
+          notes: data.notes.trim() || undefined,
         }),
       });
       if (res.ok) {
-        setRecord({ presentIds, absentIds, startTime: startTime.trim() || undefined, endTime: endTime.trim() || undefined, notes: notes.trim() || undefined });
-        setSaveMessage("Saved.");
-
-        // Reset back to default Attendance page (clears query params too)
-        setSelectedEventId("");
-        setSelectedTeamId("");
-        setSelectedDate(today());
-        setMembers([]);
-        setChoices([]);
-        setRecord(null);
-        setStartTime("");
-        setEndTime("");
-        setNotes("");
-        setSelectedEvent(null);
-        router.push("/dashboard/attendance");
+        const record = {
+          presentIds,
+          absentIds,
+          startTime: data.startTime.trim() || undefined,
+          endTime: data.endTime.trim() || undefined,
+          notes: data.notes.trim() || undefined,
+        };
+        updateTeamData(teamId, (p) => ({ ...p, record }));
+        toast("Attendance saved");
       }
     } finally {
-      setSubmitting(false);
+      setSubmittingTeamId(null);
     }
+  };
+
+  const toggleTeamSelection = (teamId: string) => {
+    setSelectedTeamIds((prev) =>
+      prev.includes(teamId) ? prev.filter((id) => id !== teamId) : [...prev, teamId]
+    );
+  };
+
+  const selectAllTeams = () => {
+    setSelectedTeamIds(teamsForDropdown.map((t) => t.id));
+  };
+
+  const clearAllTeams = () => {
+    setSelectedTeamIds([]);
   };
 
   if (!profile) return null;
@@ -231,24 +298,18 @@ export default function AttendancePage() {
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
 
-      {saveMessage && (
-        <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
-          {saveMessage}
-        </div>
-      )}
-
-      <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
-        <h2 className="mb-3 font-medium text-stone-900 dark:text-white">
+      <Card>
+        <CardHeader>
           {isSuperAdmin ? "Manage attendance (by event or ad-hoc)" : "Mark attendance (your teams)"}
-        </h2>
-        <div className="mb-4 flex flex-wrap gap-4">
+        </CardHeader>
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
           <div>
             <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Event (optional)</label>
             <select
               value={selectedEventId}
               onChange={(e) => {
                 setSelectedEventId(e.target.value);
-                setSelectedTeamId("");
+                setSelectedTeamIds([]);
               }}
               className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
             >
@@ -260,23 +321,49 @@ export default function AttendancePage() {
           </div>
           {!eventNotStarted && (
             <>
-              <div>
-                <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Team</label>
-                <select
-                  value={selectedTeamId}
-                  onChange={(e) => setSelectedTeamId(e.target.value)}
-                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                >
-                  <option value="">Select team</option>
-                  {teamsForDropdown.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-                {selectedTeam && leaderNames.length > 0 && (
-                  <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                    Leads: {leaderNames.join(", ")}
-                  </p>
-                )}
+              <div className="w-full">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="block text-xs text-stone-500 dark:text-stone-400">Teams</label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={selectAllTeams}
+                      className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAllTeams}
+                      className="text-xs font-medium text-stone-500 hover:underline dark:text-stone-400"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-56 overflow-x-hidden overflow-y-auto rounded border border-stone-300 bg-stone-50/50 p-2 dark:border-stone-600 dark:bg-stone-900/30">
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                    {teamsForDropdown.map((t) => (
+                      <label
+                        key={t.id}
+                        className="flex min-h-[44px] min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedTeamIds.includes(t.id)}
+                          onChange={() => toggleTeamSelection(t.id)}
+                          className="shrink-0 rounded border-stone-300"
+                        />
+                        <span className="min-w-0 break-words text-stone-900 dark:text-white">{t.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                  {selectedTeamIds.length === 0
+                    ? "No teams selected"
+                    : `${selectedTeamIds.length} team${selectedTeamIds.length !== 1 ? "s" : ""} selected`}
+                </p>
               </div>
               <div>
                 <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Date (today or past only)</label>
@@ -316,76 +403,111 @@ export default function AttendancePage() {
             Attendance can only be recorded for today or past dates. Please select a date on or before {today()}.
           </p>
         )}
-        {!eventNotStarted && loadingRecord && <p className="text-sm text-stone-500">Loading members…</p>}
-        {!eventNotStarted && !loadingRecord && selectedTeamId && selectedDate && isDateAllowed && (
-          <>
-            {members.length === 0 ? (
-              <p className="text-sm text-stone-500">No members in this team.</p>
-            ) : (
-              <>
-                <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time (team)</label>
-                    <input
-                      type="time"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
-                      className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                    />
+        {!eventNotStarted && selectedDate && isDateAllowed && selectedTeamIds.length > 0 && (
+          <div className="mt-4 space-y-6">
+            {selectedTeamIds.map((tid) => {
+              const team = teams.find((t) => t.id === tid);
+              const data = teamData[tid];
+              const loading = data?.loading ?? true;
+              const leaderNames =
+                team && allMembers.length > 0
+                  ? [team.leaderId, team.leader2Id]
+                      .filter((id): id is string => typeof id === "string" && id.length > 0)
+                      .map((id) => allMembers.find((m) => m.id === id)?.name ?? id)
+                  : [];
+              return (
+                <Card key={tid} className="border-l-4 border-l-amber-500">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-medium text-stone-900 dark:text-white">{team?.name ?? tid}</h3>
+                      {leaderNames.length > 0 && (
+                        <p className="text-xs text-stone-500 dark:text-stone-400">Leads: {leaderNames.join(", ")}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleTeamSelection(tid)}
+                      className="text-xs text-stone-500 hover:underline dark:text-stone-400"
+                    >
+                      Remove
+                    </button>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time (team)</label>
-                    <input
-                      type="time"
-                      value={endTime}
-                      onChange={(e) => setEndTime(e.target.value)}
-                      className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                    />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Notes for this day</label>
-                    <textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      rows={2}
-                      className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                      placeholder="Optional notes…"
-                    />
-                  </div>
-                </div>
-                <p className="mb-2 text-sm text-stone-600 dark:text-stone-400">Mark present/absent</p>
-                <div className="max-h-64 space-y-1 overflow-y-auto">
-                  {choices.map((c) => {
-                    const name = members.find((m) => m.id === c.id)?.name ?? c.id;
-                    return (
-                      <label key={c.id} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={c.present}
-                          onChange={() =>
-                            setChoices((prev) =>
-                              prev.map((p) => (p.id === c.id ? { ...p, present: !p.present } : p))
-                            )
-                          }
-                        />
-                        {name}
-                      </label>
-                    );
-                  })}
-                </div>
-                <button
-                  type="button"
-                  onClick={submitLeaderAttendance}
-                  disabled={submitting}
-                  className="mt-4 rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {submitting ? "Saving…" : "Save attendance"}
-                </button>
-              </>
-            )}
-          </>
+                  {loading ? (
+                    <p className="text-sm text-stone-500">Loading members…</p>
+                  ) : !data || data.members.length === 0 ? (
+                    <p className="text-sm text-stone-500">No members in this team.</p>
+                  ) : (
+                    <>
+                      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
+                          <input
+                            type="time"
+                            value={data.startTime}
+                            onChange={(e) => updateTeamData(tid, (p) => ({ ...p, startTime: e.target.value }))}
+                            className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
+                          <input
+                            type="time"
+                            value={data.endTime}
+                            onChange={(e) => updateTeamData(tid, (p) => ({ ...p, endTime: e.target.value }))}
+                            className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Notes</label>
+                          <textarea
+                            value={data.notes}
+                            onChange={(e) => updateTeamData(tid, (p) => ({ ...p, notes: e.target.value }))}
+                            rows={2}
+                            className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                            placeholder="Optional notes…"
+                          />
+                        </div>
+                      </div>
+                      <p className="mb-2 text-sm text-stone-600 dark:text-stone-400">Mark present/absent</p>
+                      <div className="max-h-48 space-y-1 overflow-y-auto">
+                        {data.choices.map((c) => {
+                          const name = data.members.find((m) => m.id === c.id)?.name ?? c.id;
+                          return (
+                            <label key={c.id} className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={c.present}
+                                onChange={() =>
+                                  updateTeamData(tid, (p) => ({
+                                    ...p,
+                                    choices: p.choices.map((x) =>
+                                      x.id === c.id ? { ...x, present: !x.present } : x
+                                    ),
+                                  }))
+                                }
+                                className="rounded border-stone-300"
+                              />
+                              {name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => submitLeaderAttendance(tid)}
+                        disabled={submittingTeamId === tid}
+                        className="mt-4 min-h-[44px] rounded bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {submittingTeamId === tid ? "Saving…" : "Save attendance"}
+                      </button>
+                    </>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -482,7 +604,7 @@ function MemberAttendanceView({
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Attendance</h1>
+      <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Mark your attendance</h1>
       <p className="mb-4 text-sm text-stone-600 dark:text-stone-400">
         Mark your attendance for event days. You can only mark yourself present for the teams you belong to. No future dates.
       </p>
@@ -504,7 +626,7 @@ function MemberAttendanceView({
                       type="button"
                       onClick={() => markSelfPresent(t.id, focusedEvent.id, urlDate)}
                       disabled={!canMark || submitting[key]}
-                      className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                      className="min-h-[44px] rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                     >
                       {submitting[key] ? "Saving…" : "Mark present"}
                     </button>
@@ -529,7 +651,7 @@ function MemberAttendanceView({
             <button
               type="button"
               onClick={requestLocation}
-              className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+              className="min-h-[44px] rounded bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700"
             >
               Allow location &amp; check
             </button>
@@ -553,7 +675,7 @@ function MemberAttendanceView({
             const myTeamsInEvent = teams.filter((t) => ev.teamIds.includes(t.id) && myTeamIds.includes(t.id));
             if (myTeamsInEvent.length === 0) return null;
             return (
-              <div key={ev.id} className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
+              <Card key={ev.id}>
                 <p className="mb-2 font-medium text-stone-900 dark:text-white">{ev.name}</p>
                 <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">Today is within this event. Mark attendance for your team(s):</p>
                 <ul className="space-y-2">
@@ -569,7 +691,7 @@ function MemberAttendanceView({
                             type="button"
                             onClick={() => markSelfPresent(t.id, ev.id, today())}
                             disabled={!canMark || submitting[key]}
-                            className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                            className="min-h-[44px] rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                           >
                             {submitting[key] ? "Saving…" : "Mark present"}
                           </button>
@@ -578,17 +700,14 @@ function MemberAttendanceView({
                     );
                   })}
                 </ul>
-              </div>
+              </Card>
             );
           })
         ) : teams.length === 0 ? (
           <p className="text-sm text-stone-500">You are not in any team yet.</p>
         ) : (
           teams.map((t) => (
-            <div
-              key={t.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800"
-            >
+            <Card key={t.id} className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-stone-900 dark:text-white">{t.name}</span>
               {marked[t.id] ? (
                 <span className="text-sm text-green-600 dark:text-green-400">Marked present for today</span>
@@ -597,12 +716,12 @@ function MemberAttendanceView({
                   type="button"
                   onClick={() => markSelfPresent(t.id)}
                   disabled={!canMark || submitting[t.id]}
-                  className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                  className="min-h-[44px] rounded bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                 >
                   {submitting[t.id] ? "Saving…" : "Mark present today"}
                 </button>
               )}
-            </div>
+            </Card>
           ))
         )}
       </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import { getAuthHeaders } from "@/lib/api";
 import type { Template } from "@/types";
 import type { Team } from "@/types";
@@ -61,6 +62,8 @@ export default function MessagesPage() {
   const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
   const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
   const [editScheduleDateTime, setEditScheduleDateTime] = useState("");
+  const [showScheduledMessages, setShowScheduledMessages] = useState(false);
+  const { toast } = useToast();
 
   const fetchScheduledMessages = async () => {
     setScheduledMessagesLoading(true);
@@ -206,6 +209,7 @@ export default function MessagesPage() {
       if (!res.ok) {
         const errorMsg = data.error || data.message || "Failed to send message";
         setError(errorMsg);
+        toast(errorMsg, "error");
         return;
       }
       if (data.ok) {
@@ -215,20 +219,22 @@ export default function MessagesPage() {
         
         // If all messages failed, show as error
         if (sent === 0 && failed > 0) {
-          setError(
-            `All messages failed to send. ${data.message || "Check the error details above or server logs for more information."}`
-          );
+          const msg = `All messages failed to send. ${data.message || "Check the error details above or server logs for more information."}`;
+          setError(msg);
+          toast(msg, "error");
           return;
         }
         
         // If some succeeded and some failed, show success with warning
         if (sent > 0 && failed > 0) {
+          const msg = `${data.message || "Message sent"} (${failed} failed)`;
           setSuccess({
-            message: `${data.message || "Message sent"} (Warning: ${failed} failed)`,
+            message: msg,
             sent,
             failed,
             recipientCount,
           });
+          toast(`Message sent to ${sent} recipients (${failed} failed)`, "success");
           return;
         }
         
@@ -239,11 +245,16 @@ export default function MessagesPage() {
           failed,
           recipientCount,
         });
+        toast(`Message sent to ${recipientCount} recipients`);
       } else {
-        setError(data.message || "Failed to send message");
+        const msg = data.message || "Failed to send message";
+        setError(msg);
+        toast(msg, "error");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send message");
+      const msg = e instanceof Error ? e.message : "Failed to send message";
+      setError(msg);
+      toast(msg, "error");
     } finally {
       setSending(false);
     }
@@ -260,6 +271,7 @@ export default function MessagesPage() {
       
       if (scheduledTimestamp <= now) {
         setError("Scheduled time must be in the future");
+        toast("Scheduled time must be in the future", "error");
         setScheduling(false);
         return;
       }
@@ -284,6 +296,7 @@ export default function MessagesPage() {
       if (!res.ok) {
         const errorMsg = data.error || data.message || "Failed to schedule message";
         setError(errorMsg);
+        toast(errorMsg, "error");
         return;
       }
       if (data.ok) {
@@ -294,14 +307,19 @@ export default function MessagesPage() {
           failed: 0,
           recipientCount: recipients.length,
         });
+        toast(`Message scheduled for ${scheduledDate}`);
         setShowScheduleForm(false);
         setScheduleDateTime("");
         await fetchScheduledMessages(); // Refresh scheduled messages list
       } else {
-        setError(data.message || "Failed to schedule message");
+        const msg = data.message || "Failed to schedule message";
+        setError(msg);
+        toast(msg, "error");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to schedule message");
+      const msg = e instanceof Error ? e.message : "Failed to schedule message";
+      setError(msg);
+      toast(msg, "error");
     } finally {
       setScheduling(false);
     }
@@ -595,25 +613,55 @@ export default function MessagesPage() {
       {/* Scheduled Messages Section */}
       {!loading && (
         <div className="mt-8 rounded-xl border border-stone-200 bg-white p-6 dark:border-stone-700 dark:bg-stone-800">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-stone-900 dark:text-white">Scheduled Messages</h2>
+          <div className="flex items-center justify-between">
             <button
               type="button"
-              onClick={fetchScheduledMessages}
-              disabled={scheduledMessagesLoading}
-              className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+              onClick={() => {
+                setShowScheduledMessages(!showScheduledMessages);
+                if (!showScheduledMessages && scheduledMessages.length === 0) {
+                  fetchScheduledMessages();
+                }
+              }}
+              className="flex items-center gap-2 text-left"
             >
-              {scheduledMessagesLoading ? "Refreshing..." : "Refresh"}
+              <h2 className="text-xl font-semibold text-stone-900 dark:text-white">Scheduled Messages</h2>
+              {scheduledMessages.length > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                  {scheduledMessages.length}
+                </span>
+              )}
+              <svg
+                className={`h-5 w-5 text-stone-500 transition-transform dark:text-stone-400 ${
+                  showScheduledMessages ? "rotate-180" : ""
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            {showScheduledMessages && (
+              <button
+                type="button"
+                onClick={fetchScheduledMessages}
+                disabled={scheduledMessagesLoading}
+                className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+              >
+                {scheduledMessagesLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            )}
           </div>
           
-          {scheduledMessagesLoading ? (
-            <p className="text-stone-500">Loading scheduled messages...</p>
-          ) : scheduledMessages.length === 0 ? (
-            <p className="text-stone-500">No scheduled messages</p>
-          ) : (
-            <div className="space-y-3">
-              {scheduledMessages.map((msg) => {
+          {showScheduledMessages && (
+            <div className="mt-4">
+              {scheduledMessagesLoading ? (
+                <p className="text-stone-500">Loading scheduled messages...</p>
+              ) : scheduledMessages.length === 0 ? (
+                <p className="text-stone-500">No scheduled messages</p>
+              ) : (
+                <div className="space-y-3">
+                  {scheduledMessages.map((msg) => {
                 const template = templates.find((t) => t.id === msg.templateId);
                 const scheduledDate = new Date(msg.scheduledAt);
                 const isPast = scheduledDate.getTime() <= Date.now();
@@ -697,12 +745,16 @@ export default function MessagesPage() {
                                       failed: 0,
                                       recipientCount: 0,
                                     });
+                                    toast("Scheduled message deleted");
                                   } else {
                                     const data = await res.json().catch(() => ({}));
-                                    setError(data.error || "Failed to delete scheduled message");
+                                    const err = data.error || "Failed to delete scheduled message";
+                                    setError(err);
+                                    toast(err, "error");
                                   }
                                 } catch (e) {
                                   setError("Failed to delete scheduled message");
+                                  toast("Failed to delete scheduled message", "error");
                                 }
                               }}
                               className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/20"
@@ -735,6 +787,7 @@ export default function MessagesPage() {
                               const newTimestamp = new Date(editScheduleDateTime).getTime();
                               if (newTimestamp <= Date.now()) {
                                 setError("Scheduled time must be in the future");
+                                toast("Scheduled time must be in the future", "error");
                                 return;
                               }
                               try {
@@ -754,12 +807,16 @@ export default function MessagesPage() {
                                     failed: 0,
                                     recipientCount: 0,
                                   });
+                                  toast("Scheduled message updated");
                                 } else {
                                   const data = await res.json().catch(() => ({}));
-                                  setError(data.error || "Failed to update scheduled message");
+                                  const err = data.error || "Failed to update scheduled message";
+                                  setError(err);
+                                  toast(err, "error");
                                 }
                               } catch (e) {
                                 setError("Failed to update scheduled message");
+                                toast("Failed to update scheduled message", "error");
                               }
                             }}
                             className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
@@ -781,7 +838,9 @@ export default function MessagesPage() {
                     )}
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

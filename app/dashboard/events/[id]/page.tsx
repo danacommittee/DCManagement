@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import { getDatesInRange, today } from "@/lib/dates";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { Event as EventType } from "@/types";
 import type { Member } from "@/types";
 
@@ -38,6 +39,7 @@ export default function EventDetailPage() {
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isSuperAdmin = profile?.role === "super_admin";
   const eventStartDate = event?.dateFrom?.slice(0, 10) ?? "";
@@ -191,7 +193,13 @@ export default function EventDetailPage() {
   };
 
   const deleteEvent = async () => {
-    if (!id || !isSuperAdmin || !confirm("Are you sure you want to delete this event?")) return;
+    if (!id || !isSuperAdmin) return;
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!id || !isSuperAdmin) return;
+    setShowDeleteConfirm(false);
     setDeleting(true);
     try {
       const headers = await getAuthHeaders();
@@ -360,75 +368,79 @@ export default function EventDetailPage() {
               : "Enter start and end time for each day (today and past days only)."}
           </p>
           {isSingleDay && singleDayDate ? (
-            <div className="flex flex-wrap items-end gap-4">
-              <div>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[120px]">
                 <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
                 <input
                   type="time"
                   value={dailyTimes[singleDayDate]?.startTime ?? ""}
                   onChange={(e) => updateDayTime(singleDayDate, "startTime", e.target.value)}
-                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                 />
               </div>
-              <div>
+              <div className="flex-1 min-w-[120px]">
                 <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
                 <input
                   type="time"
                   value={dailyTimes[singleDayDate]?.endTime ?? ""}
                   onChange={(e) => updateDayTime(singleDayDate, "endTime", e.target.value)}
-                  className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                  className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                 />
               </div>
               <button
                 type="button"
                 onClick={saveDailyTimes}
                 disabled={savingDailyTimes}
-                className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                className="min-h-[44px] rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
                 {savingDailyTimes ? "Saving…" : "Save"}
               </button>
             </div>
           ) : (
-            <div className="space-y-4">
-              {allowedDates.map((dateStr) => {
-                const dayData = dailyTimes[dateStr] ?? { startTime: "", endTime: "" };
-                const dateObj = new Date(dateStr + "T00:00:00");
-                const dateLabel = dateObj.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-                return (
-                  <div key={dateStr} className="rounded border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-900/30">
-                    <h3 className="mb-2 text-sm font-medium text-stone-900 dark:text-white">{dateLabel}</h3>
-                    <div className="flex flex-wrap items-end gap-4">
-                      <div>
-                        <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Start time</label>
-                        <input
-                          type="time"
-                          value={dayData.startTime ?? ""}
-                          onChange={(e) => updateDayTime(dateStr, "startTime", e.target.value)}
-                          className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">End time</label>
-                        <input
-                          type="time"
-                          value={dayData.endTime ?? ""}
-                          onChange={(e) => updateDayTime(dateStr, "endTime", e.target.value)}
-                          className="rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
-                        />
+            <div className="max-h-[400px] overflow-y-auto">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {allowedDates.map((dateStr) => {
+                  const dayData = dailyTimes[dateStr] ?? { startTime: "", endTime: "" };
+                  const dateObj = new Date(dateStr + "T00:00:00");
+                  const dateLabel = dateObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                  return (
+                    <div key={dateStr} className="rounded border border-stone-200 bg-stone-50 p-2.5 dark:border-stone-600 dark:bg-stone-900/30">
+                      <h3 className="mb-2 text-xs font-medium text-stone-900 dark:text-white">{dateLabel}</h3>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="flex-1 min-w-[100px]">
+                          <label className="mb-0.5 block text-xs text-stone-500 dark:text-stone-400">Start</label>
+                          <input
+                            type="time"
+                            value={dayData.startTime ?? ""}
+                            onChange={(e) => updateDayTime(dateStr, "startTime", e.target.value)}
+                            className="w-full rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[100px]">
+                          <label className="mb-0.5 block text-xs text-stone-500 dark:text-stone-400">End</label>
+                          <input
+                            type="time"
+                            value={dayData.endTime ?? ""}
+                            onChange={(e) => updateDayTime(dateStr, "endTime", e.target.value)}
+                            className="w-full rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
               {allowedDates.length > 0 && (
-                <button
-                  type="button"
-                  onClick={saveDailyTimes}
-                  disabled={savingDailyTimes}
-                  className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {savingDailyTimes ? "Saving…" : "Save all times"}
-                </button>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={saveDailyTimes}
+                    disabled={savingDailyTimes}
+                    className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {savingDailyTimes ? "Saving…" : "Save all times"}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -462,71 +474,93 @@ export default function EventDetailPage() {
       )}
 
       <h2 className="mb-2 font-medium text-stone-900 dark:text-white">Teams in this event</h2>
-      <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {event.teams?.map((t) => (
           <div
             key={t.id}
-            className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800"
+            className="rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-800"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-medium text-stone-900 dark:text-white">{t.name}</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h3 className="text-sm font-medium text-stone-900 dark:text-white">{t.name}</h3>
               {isSuperAdmin && editingTeamId !== t.id && (
                 <button
                   type="button"
                   onClick={() => startEditTeam(t)}
-                  className="text-sm text-amber-600 hover:underline dark:text-amber-400"
+                  className="text-xs text-amber-600 hover:underline dark:text-amber-400"
                 >
-                  Edit members
+                  Edit
                 </button>
               )}
             </div>
             {editingTeamId === t.id ? (
-              <div className="mt-3">
-                <p className="mb-2 text-xs text-stone-500 dark:text-stone-400">Select members for this team in this event:</p>
-                <div className="max-h-48 space-y-1 overflow-y-auto">
+              <div>
+                <p className="mb-2 text-xs text-stone-500 dark:text-stone-400">Select members:</p>
+                <div className="max-h-48 space-y-1 overflow-y-auto mb-2">
                   {members.map((m) => (
-                    <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <label key={m.id} className="flex cursor-pointer items-center gap-2 text-xs">
                       <input
                         type="checkbox"
                         checked={editMemberIds.includes(m.id)}
                         onChange={() => toggleTeamMember(m.id)}
+                        className="rounded"
                       />
-                      {m.name}
+                      <span className="truncate">{m.name}</span>
                     </label>
                   ))}
                 </div>
-                <div className="mt-2 flex gap-2">
+                <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={saveTeamOverride}
-                    className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700"
+                    className="flex-1 rounded bg-amber-600 px-2 py-1.5 text-xs text-white hover:bg-amber-700"
                   >
                     Save
                   </button>
                   <button
                     type="button"
                     onClick={() => setEditingTeamId(null)}
-                    className="rounded border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-600"
+                    className="flex-1 rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600"
                   >
                     Cancel
                   </button>
                 </div>
               </div>
             ) : (
-              <ul className="mt-2 list-inside list-disc text-sm text-stone-600 dark:text-stone-400">
+              <div className="text-xs text-stone-600 dark:text-stone-400">
                 {t.memberIds.length === 0 ? (
-                  <li className="text-stone-400">No members assigned</li>
+                  <span className="text-stone-400">No members</span>
                 ) : (
-                  t.memberIds.map((mid) => {
-                    const m = members.find((x) => x.id === mid);
-                    return <li key={mid}>{m?.name ?? mid}</li>;
-                  })
+                  <div className="line-clamp-3">
+                    {t.memberIds.map((mid, idx) => {
+                      const m = members.find((x) => x.id === mid);
+                      return (
+                        <span key={mid}>
+                          {m?.name ?? mid}
+                          {idx < t.memberIds.length - 1 ? ", " : ""}
+                        </span>
+                      );
+                    })}
+                  </div>
                 )}
-              </ul>
+                {t.memberIds.length > 3 && (
+                  <div className="mt-1 text-stone-500">+{t.memberIds.length - 3} more</div>
+                )}
+              </div>
             )}
           </div>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Event"
+        message={`Are you sure you want to delete "${event.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDeleteEvent}
+        onCancel={() => setShowDeleteConfirm(false)}
+        variant="danger"
+      />
     </div>
   );
 }

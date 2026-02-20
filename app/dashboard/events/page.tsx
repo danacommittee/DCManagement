@@ -172,56 +172,59 @@ export default function EventsPage() {
     router.push(`/dashboard/attendance?eventId=${ev.id}&date=${dateStr}`);
   };
 
-  const todayStr = today();
-
   const calendarDays: { dateStr: string | null; isCurrentMonth: boolean }[] = [];
   for (let i = 0; i < startPad; i++) {
     calendarDays.push({ dateStr: null, isCurrentMonth: false });
   }
   for (let d = 1; d <= totalDays; d++) {
     const date = new Date(calendarMonth.year, calendarMonth.month, d);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
     calendarDays.push({
-      dateStr: date.toISOString().slice(0, 10),
+      dateStr: `${year}-${month}-${day}`,
       isCurrentMonth: true,
     });
   }
 
-  const EventCalendar = () => (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-medium text-stone-900 dark:text-white">
-          {new Date(calendarMonth.year, calendarMonth.month).toLocaleString("default", { month: "long", year: "numeric" })}
-        </h2>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={prevMonth}
-            className="rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            onClick={nextMonth}
-            className="rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
-          >
-            →
-          </button>
+  const EventCalendar = () => {
+    const todayStr = today();
+    return (
+      <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-medium text-stone-900 dark:text-white">
+            {new Date(calendarMonth.year, calendarMonth.month).toLocaleString("default", { month: "long", year: "numeric" })}
+          </h2>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={prevMonth}
+              className="rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              onClick={nextMonth}
+              className="rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
+            >
+              →
+            </button>
+          </div>
         </div>
-      </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-xs text-stone-500 dark:text-stone-400">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d}>{d}</div>
-        ))}
-      </div>
-      <div className="mt-2 grid grid-cols-7 gap-1">
-        {calendarDays.map((cell, i) => {
-          if (!cell.dateStr) {
-            return <div key={i} className="min-h-[80px] rounded bg-stone-50 dark:bg-stone-900/50" />;
-          }
-          const dayEvents = getEventsForDate(cell.dateStr);
-          const isPast = cell.dateStr <= todayStr;
-          const isToday = cell.dateStr === todayStr;
+        <div className="grid grid-cols-7 gap-1 text-center text-xs text-stone-500 dark:text-stone-400">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+            <div key={d}>{d}</div>
+          ))}
+        </div>
+        <div className="mt-2 grid grid-cols-7 gap-1">
+          {calendarDays.map((cell, i) => {
+            if (!cell.dateStr) {
+              return <div key={i} className="min-h-[80px] rounded bg-stone-50 dark:bg-stone-900/50" />;
+            }
+            const dayEvents = getEventsForDate(cell.dateStr);
+            const isPast = cell.dateStr <= todayStr;
+            const isToday = cell.dateStr === todayStr;
           return (
             <div
               key={i}
@@ -229,7 +232,7 @@ export default function EventsPage() {
                 isToday ? "border-amber-400 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/30" : "border-stone-200 bg-stone-50/50 dark:border-stone-700 dark:bg-stone-900/50"
               }`}
             >
-              <div className="text-right text-sm font-medium text-stone-700 dark:text-stone-300">{new Date(cell.dateStr).getDate()}</div>
+              <div className="text-right text-sm font-medium text-stone-700 dark:text-stone-300">{cell.dateStr ? parseInt(cell.dateStr.split("-")[2], 10) : ""}</div>
               <div className="mt-1 space-y-0.5">
                 {dayEvents.slice(0, 3).map((ev) => (
                   <button
@@ -279,8 +282,9 @@ export default function EventsPage() {
           )}
         </div>
       )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   if (loading) return <p className="text-stone-500">Loading…</p>;
 

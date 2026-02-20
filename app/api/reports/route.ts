@@ -83,6 +83,8 @@ export async function GET(req: NextRequest) {
     const report = records.map((r) => ({
       date: r.date,
       team: teamsMap[r.teamId] != null ? teamsMap[r.teamId] : r.teamId,
+      teamId: r.teamId,
+      eventId: r.eventId ?? undefined,
       startTime: r.startTime ?? "",
       endTime: r.endTime ?? "",
       notes: r.notes ?? "",

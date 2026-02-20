@@ -2,6 +2,8 @@
 
 Web app for Dana Committee volunteer operations (Shahr-e-Lillah al-Muazzam and year-round): members, teams, messaging, attendance, and reports.
 
+**Main app:** The Next.js app at the repo root (`app/`, `components/`, etc.) is the DCMS dashboard and entrypoint. The `dcms-app/` folder is a separate Next.js app (default Next landing); it is not the main product. Use the root app for all DCMS development.
+
 ## Stack
 
 - **Frontend:** Next.js 16 (App Router), React 19, Tailwind CSS

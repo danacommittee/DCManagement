@@ -1,6 +1,10 @@
 /** Returns YYYY-MM-DD for today (call when needed for fresh value) */
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 /** Returns all dates (YYYY-MM-DD) in range [dateFrom, dateTo] inclusive */

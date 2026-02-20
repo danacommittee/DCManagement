@@ -89,7 +89,7 @@ export default function DashboardLayout({
               key={item.href}
               href={item.href}
               onClick={closeSidebar}
-              className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${
+              className={`block min-h-[44px] rounded-lg px-3 py-3 text-sm font-medium transition ${
                 pathname === item.href
                   ? "bg-stone-200 text-stone-900 dark:bg-stone-600 dark:text-white"
                   : "text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-white"
@@ -132,7 +132,39 @@ export default function DashboardLayout({
           <Image src="/logo.png" alt="" width={28} height={28} className="rounded" />
           <span className="font-semibold text-stone-900 dark:text-white">DCMS</span>
         </header>
-        <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
+        <main className={`flex-1 overflow-auto p-4 md:p-6 ${profile.role === "member" ? "pb-20 md:pb-6" : ""}`}>
+          {children}
+        </main>
+        {/* Bottom nav for members on mobile: Events + Attendance */}
+        {profile.role === "member" && (
+          <nav
+            className="fixed bottom-0 left-0 right-0 z-40 flex min-h-[56px] items-center justify-around border-t border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800 md:hidden"
+            aria-label="Main"
+          >
+            <Link
+              href="/dashboard/events"
+              onClick={closeSidebar}
+              className={`flex min-h-[44px] flex-1 items-center justify-center text-sm font-medium ${
+                pathname === "/dashboard/events" || pathname.startsWith("/dashboard/events/")
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-stone-600 dark:text-stone-400"
+              }`}
+            >
+              Events
+            </Link>
+            <Link
+              href="/dashboard/attendance"
+              onClick={closeSidebar}
+              className={`flex min-h-[44px] flex-1 items-center justify-center text-sm font-medium ${
+                pathname === "/dashboard/attendance"
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-stone-600 dark:text-stone-400"
+              }`}
+            >
+              Attendance
+            </Link>
+          </nav>
+        )}
       </div>
     </div>
   );

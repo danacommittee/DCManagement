@@ -2,10 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase-admin";
 import { getSubscriptionsByUserIds, sendPushNotification, isPushConfigured } from "@/lib/push";
 
+const WRAP_UP_MESSAGE_TEMPLATE = `Salaam {{Name}},
+
+Per the weekly rotations, tonight, you are requested to stay back after your jaman to help with urpi thaal cleaning, Dana closing work in the kitchen. We anticipate it'll not take more than 1hr after mumineen jaman.
+
+{{Team}} - 
+Your fellow members for today: {{TeamMembers}}; 
+Your leads for today: {{TeamLeaders}}
+
+Shukran,
+{{YourName}}`;
+
 /**
- * Cron: run at 8 AM daily to send push reminders to users who are in a team scheduled for today.
+ * Cron: run at 8 AM daily. Sends push reminders only to members of today's wrap-up team(s).
+ * E.g. Saturday 8 AM → all members of the Saturday wrap-up team get the message.
  * Configure in Vercel: crons: [{ path: "/api/cron/attendance-reminder", schedule: "0 8 * * *" }]
  * Or call with Authorization: Bearer CRON_SECRET or x-vercel-cron-secret.
+ * Optional env: PUSH_SENDER_NAME (default "Dana Committee - Houston") for {{YourName}}.
  */
 export async function GET(req: NextRequest) {
   const vercelCronSecret = req.headers.get("x-vercel-cron-secret");
@@ -23,65 +36,105 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const todayDayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
 
-    const eventsSnap = await db.collection("events").get();
-    const teamsSnap = await db.collection("teams").get();
-    const teamNameById = new Map<string, string>();
-    teamsSnap.docs.forEach((d) => {
-      teamNameById.set(d.id, (d.data().name as string) || d.id);
+    const [teamsSnap, membersSnap] = await Promise.all([
+      db.collection("teams").get(),
+      db.collection("members").get(),
+    ]);
+
+    const memberNameById = new Map<string, string>();
+    membersSnap.docs.forEach((d) => {
+      const x = d.data();
+      const name =
+        (x.name && String(x.name).trim()) ||
+        [x.title, x.firstName, x.lastName].filter(Boolean).join(" ") ||
+        x.email ||
+        d.id;
+      memberNameById.set(d.id, name);
     });
 
-    const memberIdToTeamNames = new Map<string, string[]>();
+    // Only wrap-up teams whose dayOfWeek matches today
+    const wrapUpTeams = teamsSnap.docs.filter((d) => {
+      const t = d.data();
+      return t.isWrapUp === true && t.dayOfWeek === todayDayOfWeek;
+    });
 
-    eventsSnap.docs.forEach((doc) => {
-      const ev = doc.data();
-      const dateFrom = (ev.dateFrom as string)?.slice(0, 10);
-      const dateTo = (ev.dateTo as string)?.slice(0, 10);
-      if (!dateFrom || !dateTo || today < dateFrom || today > dateTo) return;
-
-      const teamIds = Array.isArray(ev.teamIds) ? ev.teamIds : [];
-      const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }>) ?? {};
-
-      teamIds.forEach((teamId: string) => {
-        const teamDoc = teamsSnap.docs.find((d) => d.id === teamId);
-        const teamData = teamDoc?.data();
-        let memberIds: string[] = Array.isArray(teamData?.memberIds) ? teamData!.memberIds : [];
-        const override = overrides[teamId];
-        if (override && Array.isArray(override.memberIds)) memberIds = override.memberIds;
-        const teamName = teamNameById.get(teamId) ?? teamId;
-        memberIds.forEach((mid) => {
-          if (!memberIdToTeamNames.has(mid)) memberIdToTeamNames.set(mid, []);
-          const list = memberIdToTeamNames.get(mid)!;
-          if (!list.includes(teamName)) list.push(teamName);
-        });
+    if (wrapUpTeams.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        sent: 0,
+        message: `No wrap-up team for today (day ${todayDayOfWeek})`,
       });
-    });
-
-    const userIds = Array.from(memberIdToTeamNames.keys());
-    if (userIds.length === 0) {
-      return NextResponse.json({ ok: true, sent: 0, message: "No members scheduled today" });
     }
 
-    const subscriptionsByUser = await getSubscriptionsByUserIds(userIds);
+    const senderName = process.env.PUSH_SENDER_NAME || "Dana Committee - Houston";
+    const userIds: string[] = [];
+    const userToPayload: Map<string, { title: string; body: string; url: string }> = new Map();
+
+    for (const teamDoc of wrapUpTeams) {
+      const t = teamDoc.data();
+      const teamId = teamDoc.id;
+      const teamName = (t.name as string) || teamId;
+      const memberIds: string[] = Array.isArray(t.memberIds) ? t.memberIds : [];
+      const leaderId = t.leaderId ? String(t.leaderId) : null;
+      const leader2Id = t.leader2Id ? String(t.leader2Id) : null;
+
+      const leaderNames: string[] = [];
+      if (leaderId) leaderNames.push(memberNameById.get(leaderId) || leaderId);
+      if (leader2Id && leader2Id !== leaderId)
+        leaderNames.push(memberNameById.get(leader2Id) || leader2Id);
+      const teamLeadersStr = leaderNames.length > 0 ? leaderNames.join(", ") : "—";
+
+      for (const memberId of memberIds) {
+        const memberName = memberNameById.get(memberId) || memberId;
+        const fellowMembers = memberIds
+          .filter((id) => id !== memberId)
+          .map((id) => memberNameById.get(id) || id);
+        const teamMembersStr = fellowMembers.length > 0 ? fellowMembers.join(", ") : "—";
+
+        const body = WRAP_UP_MESSAGE_TEMPLATE.replace(/\{\{Name\}\}/g, memberName)
+          .replace(/\{\{Team\}\}/g, teamName)
+          .replace(/\{\{TeamMembers\}\}/g, teamMembersStr)
+          .replace(/\{\{TeamLeaders\}\}/g, teamLeadersStr)
+          .replace(/\{\{YourName\}\}/g, senderName);
+
+        userIds.push(memberId);
+        userToPayload.set(memberId, {
+          title: "Wrap-up reminder",
+          body,
+          url: "/dashboard/attendance",
+        });
+      }
+    }
+
+    const uniqueUserIds = [...new Set(userIds)];
+    if (uniqueUserIds.length === 0) {
+      return NextResponse.json({ ok: true, sent: 0, message: "No members in today's wrap-up team(s)" });
+    }
+
+    const subscriptionsByUser = await getSubscriptionsByUserIds(uniqueUserIds);
     let sent = 0;
-    for (const userId of userIds) {
-      const teamNames = memberIdToTeamNames.get(userId) ?? [];
-      if (teamNames.length === 0) continue;
+    for (const userId of uniqueUserIds) {
+      const payload = userToPayload.get(userId);
+      if (!payload) continue;
       const subs = subscriptionsByUser.get(userId) ?? [];
-      const title = "Attendance reminder";
-      const body = `You're scheduled in ${teamNames.join(", ")} today – don't forget to mark your attendance.`;
-      const url = "/dashboard/attendance";
       for (const sub of subs) {
         const ok = await sendPushNotification(
           { endpoint: sub.endpoint, keys: sub.keys },
-          { title, body, url }
+          payload
         );
         if (ok) sent++;
       }
     }
 
-    return NextResponse.json({ ok: true, sent, usersWithTeams: userIds.length });
+    return NextResponse.json({
+      ok: true,
+      sent,
+      usersNotified: uniqueUserIds.length,
+      wrapUpTeamsToday: wrapUpTeams.length,
+    });
   } catch (e) {
     console.error("[attendance-reminder]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

@@ -26,6 +26,7 @@
     "@types/nodemailer": "^6.4.16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "md-to-pdf": "^5.2.4",

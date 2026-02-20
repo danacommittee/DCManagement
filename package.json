@@ -15,12 +15,12 @@
     "firebase-admin": "^13.0.2",
     "next": "16.1.6",
     "nodemailer": "^6.9.16",
-    "twilio": "^5.3.4",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "twilio": "^5.3.4",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "md-to-pdf": "^5.2.4",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/nodemailer": "^6.4.16",
@@ -28,8 +28,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "md-to-pdf": "^5.2.4",
+    "sharp": "^0.33.5",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "sharp": "^0.33.5"
+    "typescript": "^5"
   }
 }

@@ -7,6 +7,13 @@ export function today(): string {
   return `${year}-${month}-${day}`;
 }
 
+/** Returns YYYY-MM-DD for the date that is `delta` days from `date` */
+export function addDays(date: string, delta: number): string {
+  const d = new Date(date + "T12:00:00");
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Returns all dates (YYYY-MM-DD) in range [dateFrom, dateTo] inclusive */
 export function getDatesInRange(dateFrom: string, dateTo: string): string[] {
   const from = new Date(dateFrom);

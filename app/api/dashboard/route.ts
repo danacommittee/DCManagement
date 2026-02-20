@@ -79,8 +79,9 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    let leadTeamIds: string[] = [];
     if (myRole === "admin") {
-      const leadTeamIds = teamsSnap.docs
+      leadTeamIds = teamsSnap.docs
         .filter((t) => {
           const x = t.data();
           return x.leaderId === myId || x.leader2Id === myId;
@@ -94,6 +95,16 @@ export async function GET(req: NextRequest) {
       }
       totalMembers = myLeadMemberIds.size;
     }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const submittedTeamIdsToday = new Set(
+      attendanceSnap.docs.filter((d) => (d.data().date as string) === today).map((d) => d.data().teamId as string)
+    );
+    const teamsToRemind =
+      myRole === "super_admin"
+        ? teamsSnap.docs.map((t) => t.id).filter((tid) => !submittedTeamIdsToday.has(tid))
+        : leadTeamIds.filter((tid) => !submittedTeamIdsToday.has(tid));
+    const teamsWithoutAttendanceToday = teamsToRemind.length;
 
     const attendanceDocs = attendanceSnap.docs;
     if (attendanceDocs.length > 0) {
@@ -115,6 +126,7 @@ export async function GET(req: NextRequest) {
       attendanceRate,
       recentAttendance,
       recentMessages,
+      teamsWithoutAttendanceToday,
     });
   } catch (e) {
     console.error(e);

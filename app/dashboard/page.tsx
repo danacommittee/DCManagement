@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import { Card, CardHeader, cardLinkClassName } from "@/components/Card";
+import { PushSubscribe } from "@/components/PushSubscribe";
 
 interface RecentAttendanceItem {
   id: string;
@@ -36,6 +37,7 @@ interface DashboardStats {
   attendanceRate: number | null;
   recentAttendance: RecentAttendanceItem[];
   recentMessages: RecentMessageItem[];
+  teamsWithoutAttendanceToday?: number;
 }
 
 interface UpcomingEvent {
@@ -85,6 +87,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
+  const [scheduledMessagesCount, setScheduledMessagesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -98,9 +101,10 @@ export default function DashboardPage() {
     if (profile?.role === "member") return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const [dashboardRes, eventsRes] = await Promise.all([
+      const [dashboardRes, eventsRes, scheduleRes] = await Promise.all([
         fetch("/api/dashboard", { headers }),
         fetch("/api/events?upcoming=true&limit=5", { headers }),
+        fetch("/api/messages/schedule", { headers }),
       ]);
       if (dashboardRes.ok) {
         const data = await dashboardRes.json();
@@ -109,6 +113,11 @@ export default function DashboardPage() {
       if (eventsRes.ok) {
         const d = await eventsRes.json();
         setUpcomingEvents(d.events ?? []);
+      }
+      if (scheduleRes.ok) {
+        const d = await scheduleRes.json();
+        const list = Array.isArray(d.scheduledMessages) ? d.scheduledMessages : [];
+        setScheduledMessagesCount(list.length);
       }
       setLoading(false);
     };
@@ -120,9 +129,62 @@ export default function DashboardPage() {
     return <DashboardSkeleton />;
   }
 
+  const canManageAttendance = profile?.role === "admin" || profile?.role === "super_admin";
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Dashboard</h1>
+
+      <div className="mb-6 flex flex-wrap gap-3">
+        {canManageAttendance && (
+          <Link
+            href="/dashboard/attendance"
+            className="inline-flex min-h-[44px] items-center rounded-xl bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700"
+          >
+            Mark today&apos;s attendance
+          </Link>
+        )}
+        {canManageAttendance && (
+          <Link
+            href="/dashboard/messages"
+            className="inline-flex min-h-[44px] items-center rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-700 shadow-sm transition hover:border-amber-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:border-amber-600"
+          >
+            Send message
+          </Link>
+        )}
+        <Link
+          href="/dashboard/reports"
+          className="inline-flex min-h-[44px] items-center rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-700 shadow-sm transition hover:border-amber-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:border-amber-600"
+        >
+          View report
+        </Link>
+      </div>
+
+      {(stats.teamsWithoutAttendanceToday != null && stats.teamsWithoutAttendanceToday > 0) || scheduledMessagesCount > 0 ? (
+        <div className="mb-6 rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-700 dark:bg-stone-900/30">
+          <h2 className="mb-2 text-sm font-medium text-stone-700 dark:text-stone-300">Where I need to act</h2>
+          <ul className="space-y-1 text-sm">
+            {stats.teamsWithoutAttendanceToday != null && stats.teamsWithoutAttendanceToday > 0 && (
+              <li>
+                <Link href="/dashboard/attendance" className="font-medium text-amber-700 hover:underline dark:text-amber-400">
+                  Attendance due today ({stats.teamsWithoutAttendanceToday} team{stats.teamsWithoutAttendanceToday !== 1 ? "s" : ""})
+                </Link>
+              </li>
+            )}
+            {scheduledMessagesCount > 0 && (
+              <li>
+                <Link href="/dashboard/messages" className="font-medium text-amber-700 hover:underline dark:text-amber-400">
+                  Scheduled messages ({scheduledMessagesCount})
+                </Link>
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="mb-6">
+        <PushSubscribe />
+      </div>
 
       {upcomingEvents.length > 0 && (
         <div className="mb-8">

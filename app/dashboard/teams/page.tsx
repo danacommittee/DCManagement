@@ -19,9 +19,12 @@ export default function TeamsPage() {
   const [editLeader2Id, setEditLeader2Id] = useState<string | null>(null);
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
+  const [teamSearch, setTeamSearch] = useState("");
   const [teamSort, setTeamSort] = useState<"name-asc" | "name-desc" | "size-desc">("name-asc");
 
   const isSuper = profile?.role === "super_admin";
+
+  const getMemberName = (id: string) => members.find((m) => m.id === id)?.name ?? members.find((m) => m.id === id)?.email ?? id;
 
   const fetchData = async () => {
     const headers = await getAuthHeaders();
@@ -128,7 +131,17 @@ export default function TeamsPage() {
     return an.localeCompare(bn);
   });
 
-  const sortedTeams = [...teams].sort((a, b) => {
+  const teamSearchLower = teamSearch.trim().toLowerCase();
+  const teamsFiltered = teamSearchLower
+    ? teams.filter((t) => {
+        const nameMatch = t.name.toLowerCase().includes(teamSearchLower);
+        const leaderName = getMemberName(t.leaderId ?? "");
+        const leader2Name = getMemberName(t.leader2Id ?? "");
+        return nameMatch || leaderName.toLowerCase().includes(teamSearchLower) || leader2Name.toLowerCase().includes(teamSearchLower);
+      })
+    : teams;
+
+  const sortedTeams = [...teamsFiltered].sort((a, b) => {
     if (teamSort === "size-desc") {
       const as = Array.isArray(a.memberIds) ? a.memberIds.length : 0;
       const bs = Array.isArray(b.memberIds) ? b.memberIds.length : 0;
@@ -177,9 +190,18 @@ export default function TeamsPage() {
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              {sortedTeams.length} team{sortedTeams.length === 1 ? "" : "s"}
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="search"
+                value={teamSearch}
+                onChange={(e) => setTeamSearch(e.target.value)}
+                placeholder="Search teams or leaders"
+                className="rounded border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-800 dark:text-white"
+              />
+              <p className="text-sm text-stone-500 dark:text-stone-400">
+                {sortedTeams.length} team{sortedTeams.length === 1 ? "" : "s"}
+              </p>
+            </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-stone-500 dark:text-stone-400">Sort by</span>
               <select

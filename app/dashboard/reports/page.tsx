@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
 import { Card } from "@/components/Card";
+import { addDays, today } from "@/lib/dates";
 import type { Team } from "@/types";
 
 export default function ReportsPage() {
@@ -47,6 +48,29 @@ export default function ReportsPage() {
       });
   }, [profile?.role]);
 
+  const effectiveFrom = isAdmin && selectedDate ? selectedDate : from;
+  const effectiveTo = isAdmin && selectedDate ? selectedDate : to;
+  const eventName = eventId ? events.find((e) => e.id === eventId)?.name : null;
+  const safeEventSlug = eventName ? eventName.replace(/[^a-zA-Z0-9-_]/g, "-").replace(/-+/g, "-").slice(0, 40) : "all";
+
+  const setDateRangePreset = (preset: "today" | "week" | "month") => {
+    const t = today();
+    if (preset === "today") {
+      setFrom(t);
+      setTo(t);
+      setSelectedDate(t);
+    } else if (preset === "week") {
+      setFrom(addDays(t, -6));
+      setTo(t);
+      setSelectedDate("");
+    } else {
+      const firstOfMonth = t.slice(0, 8) + "01";
+      setFrom(firstOfMonth);
+      setTo(t);
+      setSelectedDate("");
+    }
+  };
+
   const downloadCsv = async () => {
     setLoading(true);
     try {
@@ -68,7 +92,9 @@ export default function ReportsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "attendance-report.csv";
+      const fromStr = effectiveFrom || "start";
+      const toStr = effectiveTo || "end";
+      a.download = `attendance-${safeEventSlug}-${fromStr}-to-${toStr}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -165,6 +191,34 @@ export default function ReportsPage() {
         )}
         {isSuperAdmin && (
           <>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                Date range
+              </label>
+              <div className="mb-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDateRangePreset("today")}
+                  className="rounded border border-stone-300 px-2 py-1 text-xs font-medium hover:bg-stone-100 dark:border-stone-600 dark:hover:bg-stone-700"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDateRangePreset("week")}
+                  className="rounded border border-stone-300 px-2 py-1 text-xs font-medium hover:bg-stone-100 dark:border-stone-600 dark:hover:bg-stone-700"
+                >
+                  This week
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDateRangePreset("month")}
+                  className="rounded border border-stone-300 px-2 py-1 text-xs font-medium hover:bg-stone-100 dark:border-stone-600 dark:hover:bg-stone-700"
+                >
+                  This month
+                </button>
+              </div>
+            </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
                 From date (optional)

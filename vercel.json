@@ -1,7 +1,11 @@
 {
   "functions": {
-    "app/api/messages/process-scheduled/route.ts": {
-      "maxDuration": 300
+    "app/api/messages/process-scheduled/route.ts": { "maxDuration": 300 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/attendance-reminder",
+      "schedule": "0 8 * * *"
     }
-  }
+  ]
 }

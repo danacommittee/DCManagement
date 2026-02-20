@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { getAuthHeaders } from "@/lib/api";
 import { Card, CardHeader } from "@/components/Card";
-import { getDatesInRange, today } from "@/lib/dates";
+import { addDays, getDatesInRange, today } from "@/lib/dates";
 import type { Team } from "@/types";
 import type { Event } from "@/types";
 import type { Member } from "@/types";
@@ -39,6 +39,7 @@ export default function AttendancePage() {
   };
   const [teamData, setTeamData] = useState<Record<string, PerTeamState>>({});
   const [submittingTeamId, setSubmittingTeamId] = useState<string | null>(null);
+  const [copyingTeamId, setCopyingTeamId] = useState<string | null>(null);
   const hasAppliedDefaultTeamsRef = useRef(false);
   const { toast } = useToast();
 
@@ -272,6 +273,45 @@ export default function AttendancePage() {
     setSelectedTeamIds([]);
   };
 
+  const setAllPresent = (teamId: string) => {
+    updateTeamData(teamId, (p) => ({
+      ...p,
+      choices: p.choices.map((c) => ({ ...c, present: true })),
+    }));
+    toast("All marked present");
+  };
+
+  const copyFromPreviousDay = async (teamId: string) => {
+    const prevDate = addDays(selectedDate, -1);
+    setCopyingTeamId(teamId);
+    try {
+      const params = new URLSearchParams({ teamId, to: prevDate, expand: "members" });
+      if (selectedEventId) params.set("eventId", selectedEventId);
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/attendance?${params}`, { headers });
+      const d = await res.json();
+      const members = d.members ?? [];
+      const rec = d.record ?? null;
+      if (!rec || members.length === 0) {
+        toast("No previous attendance found to copy");
+        return;
+      }
+      const presentIds = rec.presentIds ?? [];
+      updateTeamData(teamId, (p) => ({
+        ...p,
+        choices: p.members.map((m) => ({ id: m.id, present: presentIds.includes(m.id) })),
+        startTime: rec.startTime ?? "",
+        endTime: rec.endTime ?? "",
+        notes: rec.notes ?? "",
+      }));
+      toast("Copied from previous day");
+    } catch {
+      toast("Failed to copy previous attendance");
+    } finally {
+      setCopyingTeamId(null);
+    }
+  };
+
   if (!profile) return null;
 
   // ——— Member: calendar-linked or events including today ———
@@ -302,7 +342,8 @@ export default function AttendancePage() {
         <CardHeader>
           {isSuperAdmin ? "Manage attendance (by event or ad-hoc)" : "Mark attendance (your teams)"}
         </CardHeader>
-        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
+        <div className="sticky top-0 z-10 -mx-4 -mt-2 mb-4 bg-white px-4 py-3 dark:bg-stone-800 md:-mx-6 md:px-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap">
           <div>
             <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Event (optional)</label>
             <select
@@ -392,6 +433,7 @@ export default function AttendancePage() {
               </div>
             </>
           )}
+          </div>
         </div>
         {eventNotStarted && (
           <p className="rounded bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
@@ -468,7 +510,26 @@ export default function AttendancePage() {
                           />
                         </div>
                       </div>
-                      <p className="mb-2 text-sm text-stone-600 dark:text-stone-400">Mark present/absent</p>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm text-stone-600 dark:text-stone-400">Mark present/absent</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAllPresent(tid)}
+                            className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
+                          >
+                            All present
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => copyFromPreviousDay(tid)}
+                            disabled={copyingTeamId === tid}
+                            className="text-xs font-medium text-amber-600 hover:underline disabled:opacity-50 dark:text-amber-400"
+                          >
+                            {copyingTeamId === tid ? "Copying…" : "Copy from previous day"}
+                          </button>
+                        </div>
+                      </div>
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {data.choices.map((c) => {
                           const name = data.members.find((m) => m.id === c.id)?.name ?? c.id;

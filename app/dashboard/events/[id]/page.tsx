@@ -40,8 +40,10 @@ export default function EventDetailPage() {
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
 
   const isSuperAdmin = profile?.role === "super_admin";
+  const canManageAttendance = profile?.role === "admin" || profile?.role === "super_admin";
   const eventStartDate = event?.dateFrom?.slice(0, 10) ?? "";
   // Allow setting overall time once the event has started (today or any past day), but not before it begins.
   const canSetOverallTime = isSuperAdmin && eventStartDate && eventStartDate <= today();
@@ -210,6 +212,28 @@ export default function EventDetailPage() {
     }
   };
 
+  const duplicateEvent = async () => {
+    if (!event || !isSuperAdmin) return;
+    setDuplicating(true);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/events", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `${event.name} (copy)`,
+          dateFrom: event.dateFrom,
+          dateTo: event.dateTo,
+          teamIds: event.teamIds ?? [],
+        }),
+      });
+      const d = await res.json();
+      if (res.ok && d.id) router.push(`/dashboard/events/${d.id}`);
+    } finally {
+      setDuplicating(false);
+    }
+  };
+
   const startEditTeam = (team: EventTeam) => {
     setEditingTeamId(team.id);
     setEditMemberIds([...team.memberIds]);
@@ -338,25 +362,43 @@ export default function EventDetailPage() {
             </>
           )}
         </div>
-        {isSuperAdmin && !editing && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="rounded border border-stone-300 px-4 py-2 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
+        <div className="flex flex-wrap items-center gap-2">
+          {allowedDates.length > 0 && (canManageAttendance || profile?.role === "member") && (
+            <Link
+              href={`/dashboard/attendance?eventId=${id}&date=${allowedDates.includes(today()) ? today() : allowedDates[0]}`}
+              className="rounded border border-amber-500 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-900/40"
             >
-              Edit event
-            </button>
-            <button
-              type="button"
-              onClick={deleteEvent}
-              disabled={deleting}
-              className="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {deleting ? "Deleting…" : "Delete event"}
-            </button>
-          </div>
-        )}
+              Mark attendance for this event
+            </Link>
+          )}
+          {isSuperAdmin && !editing && (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded border border-stone-300 px-4 py-2 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700"
+              >
+                Edit event
+              </button>
+              <button
+                type="button"
+                onClick={duplicateEvent}
+                disabled={duplicating}
+                className="rounded border border-stone-300 px-4 py-2 text-sm dark:border-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700 disabled:opacity-50"
+              >
+                {duplicating ? "Duplicating…" : "Duplicate event"}
+              </button>
+              <button
+                type="button"
+                onClick={deleteEvent}
+                disabled={deleting}
+                className="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete event"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {canSetOverallTime && !editing && (

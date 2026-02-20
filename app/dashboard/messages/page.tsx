@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { getAuthHeaders } from "@/lib/api";
@@ -63,7 +63,28 @@ export default function MessagesPage() {
   const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
   const [editScheduleDateTime, setEditScheduleDateTime] = useState("");
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
+  const hasHydratedLastUsed = useRef(false);
   const { toast } = useToast();
+
+  const MESSAGES_LAST_USED_KEY = "dcms_messages_lastUsed";
+
+  const templatesSorted = useMemo(() => {
+    if (typeof window === "undefined") return templates;
+    try {
+      const raw = localStorage.getItem(MESSAGES_LAST_USED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const lastId = parsed?.templateId;
+      if (!lastId || !templates.some((t) => t.id === lastId)) return templates;
+      const idx = templates.findIndex((t) => t.id === lastId);
+      if (idx <= 0) return templates;
+      const copy = [...templates];
+      const [item] = copy.splice(idx, 1);
+      copy.unshift(item);
+      return copy;
+    } catch {
+      return templates;
+    }
+  }, [templates]);
 
   const fetchScheduledMessages = async () => {
     setScheduledMessagesLoading(true);
@@ -115,6 +136,37 @@ export default function MessagesPage() {
     run();
     fetchScheduledMessages();
   }, [profile?.role]);
+
+  useEffect(() => {
+    if (hasHydratedLastUsed.current || loading || templates.length === 0) return;
+    try {
+      const raw = localStorage.getItem(MESSAGES_LAST_USED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || typeof parsed !== "object") return;
+      hasHydratedLastUsed.current = true;
+      if (parsed.templateId && templates.some((t) => t.id === parsed.templateId)) {
+        setTemplateId(parsed.templateId);
+      }
+      if (parsed.eventId && events.some((e) => e.id === parsed.eventId)) {
+        setEventId(parsed.eventId);
+      }
+      if (parsed.audienceId && teams.some((t) => t.id === parsed.audienceId)) {
+        setAudienceId(parsed.audienceId);
+      }
+    } catch {
+      hasHydratedLastUsed.current = true;
+    }
+  }, [loading, templates, events, teams]);
+
+  const saveLastUsed = (updates: { templateId?: string; eventId?: string; audienceId?: string }) => {
+    try {
+      const raw = localStorage.getItem(MESSAGES_LAST_USED_KEY);
+      const prev = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(MESSAGES_LAST_USED_KEY, JSON.stringify({ ...prev, ...updates }));
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (!eventId) {
@@ -347,14 +399,16 @@ export default function MessagesPage() {
             <select
               value={templateId}
               onChange={(e) => {
-                setTemplateId(e.target.value);
+                const v = e.target.value;
+                setTemplateId(v);
                 setSuccess(null);
                 setError(null);
+                saveLastUsed({ templateId: v });
               }}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
             >
               <option value="">Select template</option>
-              {templates.map((t) => (
+              {templatesSorted.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
@@ -363,7 +417,11 @@ export default function MessagesPage() {
             <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Event (optional)</label>
             <select
               value={eventId}
-              onChange={(e) => setEventId(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setEventId(v);
+                saveLastUsed({ eventId: v });
+              }}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
             >
               <option value="">No event (default teams)</option>
@@ -400,7 +458,11 @@ export default function MessagesPage() {
               </label>
               <select
                 value={audienceId}
-                onChange={(e) => setAudienceId(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setAudienceId(v);
+                  saveLastUsed({ audienceId: v });
+                }}
                 className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               >
                 <option value="">Select team</option>
@@ -412,7 +474,31 @@ export default function MessagesPage() {
           )}
           {audienceType === "individual" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Members (select one or more)</label>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300">Members (select one or more)</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAudienceIds(members.map((m) => m.id));
+                      setAudienceId("");
+                    }}
+                    className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAudienceIds([]);
+                      setAudienceId("");
+                    }}
+                    className="text-xs font-medium text-stone-500 hover:underline dark:text-stone-400"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </div>
               <div className="max-h-48 overflow-y-auto rounded border border-stone-300 bg-stone-50/50 py-2 pl-2 dark:border-stone-600 dark:bg-stone-900/30">
                 {members.map((m) => (
                   <label key={m.id} className="flex cursor-pointer items-center gap-2 py-1 pl-2 text-sm text-stone-700 dark:text-stone-300">
@@ -431,9 +517,9 @@ export default function MessagesPage() {
                   </label>
                 ))}
               </div>
-              {audienceIds.length > 0 && (
-                <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">{audienceIds.length} selected</p>
-              )}
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                {audienceIds.length === 0 ? "No members selected" : `${audienceIds.length} selected`}
+              </p>
             </div>
           )}
           <div>

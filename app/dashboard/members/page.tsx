@@ -8,6 +8,7 @@ import { getAuthHeaders } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { Member } from "@/types";
 import type { Role } from "@/types";
+import type { Team } from "@/types";
 
 const TITLES = ["", "Mulla", "Shaikh", "Bhai", "Bhen"];
 
@@ -37,6 +38,9 @@ export default function MembersPage() {
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"name-asc" | "name-desc" | "role">("name-asc");
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [bulkTeamId, setBulkTeamId] = useState("");
+  const [bulkAction, setBulkAction] = useState<"add" | "remove" | null>(null);
 
   const canManage = profile?.role === "super_admin";
 
@@ -87,8 +91,98 @@ export default function MembersPage() {
       setLoading(false);
       return;
     }
-    fetchMembers();
-  }, [profile?.role]);
+    const run = async () => {
+      const headers = await getAuthHeaders();
+      const [membersRes, teamsRes] = await Promise.all([
+        fetch("/api/members", { headers }),
+        canManage ? fetch("/api/teams", { headers }) : Promise.resolve(null),
+      ]);
+      if (membersRes.ok) {
+        const data = await membersRes.json();
+        setMembers(data.members);
+      }
+      if (teamsRes?.ok) {
+        const data = await teamsRes.json();
+        setTeams(data.teams ?? []);
+      }
+      setLoading(false);
+    };
+    run();
+  }, [profile?.role, canManage]);
+
+  const exportCsv = () => {
+    const headers = ["name", "email", "phone", "itsNumber", "title", "role"];
+    const rows = sortedMembers.map((m) => {
+      const name = getDisplayName(m);
+      return [name, m.email ?? "", m.phone ?? "", m.itsNumber ?? "", m.title ?? "", m.role ?? ""].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `members-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const bulkAddToTeam = async () => {
+    if (!bulkTeamId || selectedIds.size === 0 || !canManage) return;
+    const team = teams.find((t) => t.id === bulkTeamId);
+    if (!team) return;
+    const current = new Set(team.memberIds ?? []);
+    selectedIds.forEach((id) => current.add(id));
+    setBulkAction("add");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/teams/${bulkTeamId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ memberIds: Array.from(current) }),
+      });
+      if (res.ok) {
+        await fetchMembers();
+        const tr = await getAuthHeaders().then((h) => fetch("/api/teams", { headers: h }));
+        if (tr.ok) {
+          const data = await tr.json();
+          setTeams(data.teams ?? []);
+        }
+        setSelectedIds(new Set());
+        setBulkTeamId("");
+      }
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const bulkRemoveFromTeam = async () => {
+    if (!bulkTeamId || selectedIds.size === 0 || !canManage) return;
+    const team = teams.find((t) => t.id === bulkTeamId);
+    if (!team) return;
+    const current = new Set(team.memberIds ?? []);
+    selectedIds.forEach((id) => current.delete(id));
+    setBulkAction("remove");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/teams/${bulkTeamId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ memberIds: Array.from(current) }),
+      });
+      if (res.ok) {
+        await fetchMembers();
+        const tr = await getAuthHeaders().then((h) => fetch("/api/teams", { headers: h }));
+        if (tr.ok) {
+          const data = await tr.json();
+          setTeams(data.teams ?? []);
+        }
+        setSelectedIds(new Set());
+        setBulkTeamId("");
+      }
+    } finally {
+      setBulkAction(null);
+    }
+  };
 
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -303,19 +397,54 @@ export default function MembersPage() {
           >
             {showAddForm ? "Cancel" : "Add member"}
           </button>
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-800"
+          >
+            Export CSV
+          </button>
           {selectedIds.size > 0 && (
-            <button
-              type="button"
-              onClick={deleteSelected}
-              className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
-            >
-              Delete selected ({selectedIds.size})
-            </button>
+            <>
+              <select
+                value={bulkTeamId}
+                onChange={(e) => setBulkTeamId(e.target.value)}
+                className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-800 dark:text-white"
+              >
+                <option value="">Select team</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={bulkAddToTeam}
+                disabled={!bulkTeamId || bulkAction !== null}
+                className="rounded-lg border border-amber-500 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:text-amber-400 dark:hover:bg-amber-900/20"
+              >
+                {bulkAction === "add" ? "Adding…" : "Add to team"}
+              </button>
+              <button
+                type="button"
+                onClick={bulkRemoveFromTeam}
+                disabled={!bulkTeamId || bulkAction !== null}
+                className="rounded-lg border border-stone-400 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-500 dark:text-stone-300 dark:hover:bg-stone-700"
+              >
+                {bulkAction === "remove" ? "Removing…" : "Remove from team"}
+              </button>
+              <button
+                type="button"
+                onClick={deleteSelected}
+                className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
+              >
+                Delete selected ({selectedIds.size})
+              </button>
+            </>
           )}
           <button
             type="button"
             onClick={deleteAll}
-            className="rounded-lg border border-red-400 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            className="rounded-lg border border-red-400 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-400 dark:hover:bg-red-900/20"
           >
             Delete all members
           </button>

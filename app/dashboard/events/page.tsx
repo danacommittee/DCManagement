@@ -172,6 +172,17 @@ export default function EventsPage() {
     router.push(`/dashboard/attendance?eventId=${ev.id}&date=${dateStr}`);
   };
 
+  const duplicateEvent = (ev: EventType) => {
+    closeMenu();
+    setForm({
+      name: `${ev.name} (copy)`,
+      dateFrom: ev.dateFrom?.slice(0, 10) ? ev.dateFrom.slice(0, 10) + "T00:00:00" : "",
+      dateTo: ev.dateTo?.slice(0, 10) ? ev.dateTo.slice(0, 10) + "T23:59:59" : "",
+      teamIds: [...(ev.teamIds ?? [])],
+    });
+    setShowForm(true);
+  };
+
   const calendarDays: { dateStr: string | null; isCurrentMonth: boolean }[] = [];
   for (let i = 0; i < startPad; i++) {
     calendarDays.push({ dateStr: null, isCurrentMonth: false });
@@ -262,6 +273,15 @@ export default function EventsPage() {
           >
             Event detail
           </button>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => duplicateEvent(eventMenu.event)}
+              className="block w-full px-4 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-700"
+            >
+              Duplicate event
+            </button>
+          )}
           {canManageAttendance && eventMenu.date <= todayStr && (
             <button
               type="button"

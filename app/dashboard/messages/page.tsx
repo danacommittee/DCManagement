@@ -46,6 +46,9 @@ export default function MessagesPage() {
   const [success, setSuccess] = useState<{ message: string; sent: number; failed: number; recipientCount: number } | null>(null);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [scheduleDateTime, setScheduleDateTime] = useState("");
+  const [scheduleRecurrence, setScheduleRecurrence] = useState<"none" | "daily" | "weekly">("none");
+  const [scheduleRecurrenceTime, setScheduleRecurrenceTime] = useState("09:00");
+  const [scheduleRecurrenceDayOfWeek, setScheduleRecurrenceDayOfWeek] = useState(1); // Monday
   const [templateId, setTemplateId] = useState("");
   const [eventId, setEventId] = useState("");
   const [events, setEvents] = useState<{ id: string; name: string; teamIds?: string[] }[]>([]);
@@ -329,20 +332,29 @@ export default function MessagesPage() {
       }
 
       const headers = await getAuthHeaders();
+      const body: Record<string, unknown> = {
+        templateId,
+        eventId: eventId || undefined,
+        audienceType,
+        audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
+        audienceIds: audienceType === "individual" && audienceIds.length > 0 ? audienceIds : undefined,
+        bodyOverride: previewBody.trim() || undefined,
+        subjectOverride: channels.includes("email") && emailSubject.trim() ? emailSubject.trim() : undefined,
+        channels: channels.filter((c) => c !== "whatsapp"),
+        scheduledAt: scheduledTimestamp,
+      };
+      if (scheduleRecurrence === "daily") {
+        body.recurrence = "daily";
+        body.recurrenceTime = scheduleRecurrenceTime;
+      } else if (scheduleRecurrence === "weekly") {
+        body.recurrence = "weekly";
+        body.recurrenceTime = scheduleRecurrenceTime;
+        body.recurrenceDayOfWeek = scheduleRecurrenceDayOfWeek;
+      }
       const res = await fetch("/api/messages/schedule", {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          templateId,
-          eventId: eventId || undefined,
-          audienceType,
-          audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
-          audienceIds: audienceType === "individual" && audienceIds.length > 0 ? audienceIds : undefined,
-          bodyOverride: previewBody.trim() || undefined,
-          subjectOverride: channels.includes("email") && emailSubject.trim() ? emailSubject.trim() : undefined,
-          channels: channels.filter((c) => c !== "whatsapp"),
-          scheduledAt: scheduledTimestamp,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -362,6 +374,9 @@ export default function MessagesPage() {
         toast(`Message scheduled for ${scheduledDate}`);
         setShowScheduleForm(false);
         setScheduleDateTime("");
+        setScheduleRecurrence("none");
+        setScheduleRecurrenceTime("09:00");
+        setScheduleRecurrenceDayOfWeek(1);
         await fetchScheduledMessages(); // Refresh scheduled messages list
       } else {
         const msg = data.message || "Failed to schedule message";
@@ -615,7 +630,7 @@ export default function MessagesPage() {
           {showScheduleForm && (
             <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-600 dark:bg-stone-900/30">
               <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">
-                Schedule Date & Time
+                Schedule Date & Time (first run)
               </label>
               <input
                 type="datetime-local"
@@ -624,6 +639,57 @@ export default function MessagesPage() {
                 min={toLocalDatetimeLocalString(new Date())}
                 className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
               />
+              <div className="mb-3">
+                <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Recurring</label>
+                <div className="flex flex-wrap gap-3">
+                  {(["none", "daily", "weekly"] as const).map((opt) => (
+                    <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="scheduleRecurrence"
+                        checked={scheduleRecurrence === opt}
+                        onChange={() => setScheduleRecurrence(opt)}
+                        className="rounded border-stone-300"
+                      />
+                      <span className="text-stone-700 dark:text-stone-300">
+                        {opt === "none" ? "One-time" : opt === "daily" ? "Every day" : "Every week"}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {scheduleRecurrence === "daily" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-sm text-stone-600 dark:text-stone-400">at</span>
+                    <input
+                      type="time"
+                      value={scheduleRecurrenceTime}
+                      onChange={(e) => setScheduleRecurrenceTime(e.target.value)}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    />
+                  </div>
+                )}
+                {scheduleRecurrence === "weekly" && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-stone-600 dark:text-stone-400">Every</span>
+                    <select
+                      value={scheduleRecurrenceDayOfWeek}
+                      onChange={(e) => setScheduleRecurrenceDayOfWeek(Number(e.target.value))}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    >
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, i) => (
+                        <option key={day} value={i}>{day}</option>
+                      ))}
+                    </select>
+                    <span className="text-sm text-stone-600 dark:text-stone-400">at</span>
+                    <input
+                      type="time"
+                      value={scheduleRecurrenceTime}
+                      onChange={(e) => setScheduleRecurrenceTime(e.target.value)}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    />
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -638,6 +704,9 @@ export default function MessagesPage() {
                   onClick={() => {
                     setShowScheduleForm(false);
                     setScheduleDateTime("");
+                    setScheduleRecurrence("none");
+                    setScheduleRecurrenceTime("09:00");
+                    setScheduleRecurrenceDayOfWeek(1);
                   }}
                   className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
                 >

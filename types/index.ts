@@ -100,6 +100,10 @@ export interface ScheduledMessage {
   createdBy: string;
   sentAt?: number; // When it was actually sent
   error?: string;
+  /** Recurrence: "daily" = every day at recurrenceTime; "weekly" = every recurrenceDayOfWeek at recurrenceTime */
+  recurrence?: "daily" | "weekly" | null;
+  recurrenceTime?: string; // "HH:mm" 24h
+  recurrenceDayOfWeek?: number; // 0=Sun .. 6=Sat, for weekly
 }
 
 export interface AttendanceRecord {

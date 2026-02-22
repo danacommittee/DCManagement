@@ -28,6 +28,11 @@ export async function POST(req: NextRequest) {
     const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
     const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
     const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
+    const recurrence = body.recurrence === "daily" || body.recurrence === "weekly" ? body.recurrence : null;
+    const recurrenceTime = typeof body.recurrenceTime === "string" ? body.recurrenceTime.trim() : undefined;
+    const recurrenceDayOfWeek = typeof body.recurrenceDayOfWeek === "number" && body.recurrenceDayOfWeek >= 0 && body.recurrenceDayOfWeek <= 6
+      ? body.recurrenceDayOfWeek
+      : undefined;
 
     if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType)) {
       return NextResponse.json({ error: "Invalid templateId or audienceType" }, { status: 400 });
@@ -39,6 +44,13 @@ export async function POST(req: NextRequest) {
 
     if (channels.length === 0) {
       return NextResponse.json({ error: "At least one channel required" }, { status: 400 });
+    }
+
+    if (recurrence === "daily" && !recurrenceTime) {
+      return NextResponse.json({ error: "recurrenceTime (HH:mm) required for daily recurrence" }, { status: 400 });
+    }
+    if (recurrence === "weekly" && (recurrenceTime == null || recurrenceDayOfWeek == null)) {
+      return NextResponse.json({ error: "recurrenceTime and recurrenceDayOfWeek required for weekly recurrence" }, { status: 400 });
     }
 
     // Verify template exists
@@ -74,6 +86,11 @@ export async function POST(req: NextRequest) {
     }
     if (subjectOverride) {
       scheduledMessage.subjectOverride = subjectOverride;
+    }
+    if (recurrence) {
+      scheduledMessage.recurrence = recurrence;
+      if (recurrenceTime) scheduledMessage.recurrenceTime = recurrenceTime;
+      if (recurrenceDayOfWeek !== undefined) scheduledMessage.recurrenceDayOfWeek = recurrenceDayOfWeek;
     }
 
     const ref = await db.collection("scheduledMessages").add(scheduledMessage);

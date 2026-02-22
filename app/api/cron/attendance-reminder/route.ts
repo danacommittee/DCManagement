@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/firebase-admin";
 import { getSubscriptionsByUserIds, sendPushNotification, isPushConfigured } from "@/lib/push";
+import { sendSmsGate, isSmsGateConfigured } from "@/lib/sms-gate";
+import { toE164 } from "@/lib/phone";
 
 const WRAP_UP_MESSAGE_TEMPLATE = `Salaam {{Name}},
 
@@ -14,8 +16,9 @@ Shukran,
 {{YourName}}`;
 
 /**
- * Cron: run at 8 AM daily. Sends push reminders only to members of today's wrap-up team(s).
- * E.g. Saturday 8 AM → all members of the Saturday wrap-up team get the message.
+ * Cron: run at 8 AM daily. Sends SMS and/or push reminders to today's wrap-up team(s).
+ * Order: team members first, then team leaders (per team).
+ * E.g. Saturday 8 AM → members then leaders of the Saturday wrap-up team.
  * Configure in Vercel: crons: [{ path: "/api/cron/attendance-reminder", schedule: "0 8 * * *" }]
  * Or call with Authorization: Bearer CRON_SECRET or x-vercel-cron-secret.
  * Optional env: PUSH_SENDER_NAME (default "Dana Committee - Houston") for {{YourName}}.
@@ -31,8 +34,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!isPushConfigured()) {
-    return NextResponse.json({ error: "Push not configured" }, { status: 503 });
+  if (!isPushConfigured() && !isSmsGateConfigured()) {
+    return NextResponse.json({ error: "Neither push nor SMS configured" }, { status: 503 });
   }
 
   try {
@@ -45,6 +48,7 @@ export async function GET(req: NextRequest) {
     ]);
 
     const memberNameById = new Map<string, string>();
+    const memberPhoneById = new Map<string, string>();
     membersSnap.docs.forEach((d) => {
       const x = d.data();
       const name =
@@ -53,6 +57,7 @@ export async function GET(req: NextRequest) {
         x.email ||
         d.id;
       memberNameById.set(d.id, name);
+      if (x.phone && String(x.phone).trim()) memberPhoneById.set(d.id, String(x.phone).trim());
     });
 
     // Only wrap-up teams whose dayOfWeek matches today
@@ -64,13 +69,16 @@ export async function GET(req: NextRequest) {
     if (wrapUpTeams.length === 0) {
       return NextResponse.json({
         ok: true,
-        sent: 0,
+        smsSent: 0,
+        pushSent: 0,
         message: `No wrap-up team for today (day ${todayDayOfWeek})`,
       });
     }
 
     const senderName = process.env.PUSH_SENDER_NAME || "Dana Committee - Houston";
-    const userIds: string[] = [];
+    // Order: members first, then leaders (per team); dedupe by order of first appearance
+    const orderedUserIds: string[] = [];
+    const seen = new Set<string>();
     const userToPayload: Map<string, { title: string; body: string; url: string }> = new Map();
 
     for (const teamDoc of wrapUpTeams) {
@@ -87,6 +95,7 @@ export async function GET(req: NextRequest) {
         leaderNames.push(memberNameById.get(leader2Id) || leader2Id);
       const teamLeadersStr = leaderNames.length > 0 ? leaderNames.join(", ") : "—";
 
+      // 1) Members first
       for (const memberId of memberIds) {
         const memberName = memberNameById.get(memberId) || memberId;
         const fellowMembers = memberIds
@@ -100,8 +109,38 @@ export async function GET(req: NextRequest) {
           .replace(/\{\{TeamLeaders\}\}/g, teamLeadersStr)
           .replace(/\{\{YourName\}\}/g, senderName);
 
-        userIds.push(memberId);
+        if (!seen.has(memberId)) {
+          seen.add(memberId);
+          orderedUserIds.push(memberId);
+        }
         userToPayload.set(memberId, {
+          title: "Wrap-up reminder",
+          body,
+          url: "/dashboard/attendance",
+        });
+      }
+
+      // 2) Then leaders (same template, personalized)
+      const leaderIds = [leaderId, leader2Id].filter((id): id is string => !!id && id.length > 0);
+      for (const lid of leaderIds) {
+        const leaderName = memberNameById.get(lid) || lid;
+        const teamMembersStr = memberIds.length > 0
+          ? memberIds.map((id) => memberNameById.get(id) || id).join(", ")
+          : "—";
+        const otherLeaders = leaderNames.filter((n) => n !== leaderName);
+        const teamLeadersStrForLeader = otherLeaders.length > 0 ? otherLeaders.join(", ") : "—";
+
+        const body = WRAP_UP_MESSAGE_TEMPLATE.replace(/\{\{Name\}\}/g, leaderName)
+          .replace(/\{\{Team\}\}/g, teamName)
+          .replace(/\{\{TeamMembers\}\}/g, teamMembersStr)
+          .replace(/\{\{TeamLeaders\}\}/g, teamLeadersStrForLeader)
+          .replace(/\{\{YourName\}\}/g, senderName);
+
+        if (!seen.has(lid)) {
+          seen.add(lid);
+          orderedUserIds.push(lid);
+        }
+        userToPayload.set(lid, {
           title: "Wrap-up reminder",
           body,
           url: "/dashboard/attendance",
@@ -109,30 +148,47 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const uniqueUserIds = [...new Set(userIds)];
-    if (uniqueUserIds.length === 0) {
-      return NextResponse.json({ ok: true, sent: 0, message: "No members in today's wrap-up team(s)" });
+    if (orderedUserIds.length === 0) {
+      return NextResponse.json({ ok: true, smsSent: 0, pushSent: 0, message: "No members in today's wrap-up team(s)" });
     }
 
-    const subscriptionsByUser = await getSubscriptionsByUserIds(uniqueUserIds);
-    let sent = 0;
-    for (const userId of uniqueUserIds) {
-      const payload = userToPayload.get(userId);
-      if (!payload) continue;
-      const subs = subscriptionsByUser.get(userId) ?? [];
-      for (const sub of subs) {
-        const ok = await sendPushNotification(
-          { endpoint: sub.endpoint, keys: sub.keys },
-          payload
-        );
-        if (ok) sent++;
+    let smsSent = 0;
+    let pushSent = 0;
+
+    // Send SMS first (members first, then leaders), if configured
+    if (isSmsGateConfigured()) {
+      for (const userId of orderedUserIds) {
+        const payload = userToPayload.get(userId);
+        const phone = memberPhoneById.get(userId);
+        const e164 = phone ? toE164(phone) : null;
+        if (!payload || !e164) continue;
+        const result = await sendSmsGate({ message: payload.body, phoneNumbers: [e164] });
+        if (result.ok) smsSent++;
+      }
+    }
+
+    // Then send push (if enabled for user), same order
+    if (isPushConfigured()) {
+      const subscriptionsByUser = await getSubscriptionsByUserIds(orderedUserIds);
+      for (const userId of orderedUserIds) {
+        const payload = userToPayload.get(userId);
+        if (!payload) continue;
+        const subs = subscriptionsByUser.get(userId) ?? [];
+        for (const sub of subs) {
+          const ok = await sendPushNotification(
+            { endpoint: sub.endpoint, keys: sub.keys },
+            payload
+          );
+          if (ok) pushSent++;
+        }
       }
     }
 
     return NextResponse.json({
       ok: true,
-      sent,
-      usersNotified: uniqueUserIds.length,
+      smsSent,
+      pushSent,
+      usersNotified: orderedUserIds.length,
       wrapUpTeamsToday: wrapUpTeams.length,
     });
   } catch (e) {

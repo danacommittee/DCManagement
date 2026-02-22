@@ -8,7 +8,10 @@ import {
   signOut as firebaseSignOut,
   User,
 } from "firebase/auth";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { auth, isFirebaseConfigured, setAuthPersistence } from "@/lib/firebase";
+
+const LOGIN_AT_KEY = "dcms_login_at";
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 import type { Role } from "@/types";
 
 interface MemberProfile {
@@ -73,13 +76,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
       if (!firebaseUser) {
+        if (typeof window !== "undefined") try { localStorage.removeItem(LOGIN_AT_KEY); } catch {}
+        setUser(null);
         setProfile(null);
         setError(null);
         setLoading(false);
         return;
       }
+      // Enforce 30-day max session: if login was > 30 days ago, sign out
+      if (typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem(LOGIN_AT_KEY);
+          const loginAt = raw ? parseInt(raw, 10) : NaN;
+          if (!Number.isFinite(loginAt)) {
+            localStorage.setItem(LOGIN_AT_KEY, String(Date.now()));
+          } else if (Date.now() - loginAt > THIRTY_DAYS_MS) {
+            await firebaseSignOut(auth);
+            localStorage.removeItem(LOGIN_AT_KEY);
+            setUser(null);
+            setProfile(null);
+            setError(null);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setUser(firebaseUser);
       await fetchProfile(firebaseUser);
       setLoading(false);
     });
@@ -93,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
+      await setAuthPersistence();
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (e) {
@@ -101,6 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    if (typeof window !== "undefined") try { localStorage.removeItem(LOGIN_AT_KEY); } catch {}
     if (isFirebaseConfigured) await firebaseSignOut(auth);
     setUser(null);
     setProfile(null);

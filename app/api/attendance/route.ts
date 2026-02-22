@@ -126,6 +126,8 @@ export async function GET(req: NextRequest) {
             startTime: rec.startTime,
             endTime: rec.endTime,
             notes: rec.notes,
+            submittedBy: rec.submittedBy,
+            submittedByName: rec.submittedBy ? (membersMap.get(rec.submittedBy as string) ?? undefined) : undefined,
           }
         : null;
       return NextResponse.json({ records, record, members });

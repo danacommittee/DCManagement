@@ -3,6 +3,30 @@ import { db } from "@/lib/firebase-admin";
 import type { ScheduledMessage } from "@/types";
 import { sendMessages } from "@/lib/message-sender";
 
+/** Compute next run timestamp for recurring: daily at recurrenceTime, or weekly on recurrenceDayOfWeek at recurrenceTime. */
+function getNextScheduledAt(opts: {
+  recurrence: "daily" | "weekly";
+  recurrenceTime: string;
+  recurrenceDayOfWeek?: number;
+  afterTimestamp: number;
+}): number {
+  const [h, m] = opts.recurrenceTime.split(":").map(Number);
+  const after = new Date(opts.afterTimestamp);
+  const next = new Date(after);
+  next.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+
+  if (opts.recurrence === "daily") {
+    if (next.getTime() <= opts.afterTimestamp) next.setDate(next.getDate() + 1);
+    return next.getTime();
+  }
+  // weekly: next occurrence of recurrenceDayOfWeek (0=Sun .. 6=Sat)
+  const targetDay = opts.recurrenceDayOfWeek ?? 0;
+  let daysToAdd = (targetDay - next.getDay() + 7) % 7;
+  if (daysToAdd === 0 && next.getTime() <= opts.afterTimestamp) daysToAdd = 7;
+  next.setDate(next.getDate() + daysToAdd);
+  return next.getTime();
+}
+
 /**
  * This endpoint processes scheduled messages that are due to be sent.
  * It should be called periodically (e.g., via Vercel Cron Jobs or external cron service).
@@ -109,22 +133,121 @@ export async function GET(req: NextRequest) {
           senderName,
         });
 
+        const now = Date.now();
         if (sendResult.ok && sendResult.failed === 0) {
           await db.collection("scheduledMessages").doc(msg.id).update({
             status: "sent",
-            sentAt: Date.now(),
+            sentAt: now,
           });
           processed++;
           console.log(`[Process Scheduled] Successfully sent message ${msg.id}`);
+          // Schedule next occurrence for recurring
+          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "daily",
+              recurrenceTime: msg.recurrenceTime,
+              afterTimestamp: now,
+            });
+            await db.collection("scheduledMessages").add({
+              templateId: msg.templateId,
+              eventId: msg.eventId,
+              audienceType: msg.audienceType,
+              audienceId: msg.audienceId,
+              audienceIds: msg.audienceIds,
+              bodyOverride: msg.bodyOverride,
+              subjectOverride: msg.subjectOverride,
+              channels: msg.channels,
+              scheduledAt: nextAt,
+              status: "pending",
+              createdAt: now,
+              createdBy: msg.createdBy,
+              recurrence: "daily",
+              recurrenceTime: msg.recurrenceTime,
+            });
+            console.log(`[Process Scheduled] Created next daily run at ${new Date(nextAt).toISOString()}`);
+          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "weekly",
+              recurrenceTime: msg.recurrenceTime,
+              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
+              afterTimestamp: now,
+            });
+            await db.collection("scheduledMessages").add({
+              templateId: msg.templateId,
+              eventId: msg.eventId,
+              audienceType: msg.audienceType,
+              audienceId: msg.audienceId,
+              audienceIds: msg.audienceIds,
+              bodyOverride: msg.bodyOverride,
+              subjectOverride: msg.subjectOverride,
+              channels: msg.channels,
+              scheduledAt: nextAt,
+              status: "pending",
+              createdAt: now,
+              createdBy: msg.createdBy,
+              recurrence: "weekly",
+              recurrenceTime: msg.recurrenceTime,
+              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
+            });
+            console.log(`[Process Scheduled] Created next weekly run at ${new Date(nextAt).toISOString()}`);
+          }
         } else if (sendResult.ok && sendResult.sent > 0) {
           // Partial success - some sent, some failed
           await db.collection("scheduledMessages").doc(msg.id).update({
             status: "sent",
-            sentAt: Date.now(),
+            sentAt: now,
             error: `Partial: ${sendResult.failed} failed`,
           });
           processed++;
           console.log(`[Process Scheduled] Partially sent message ${msg.id} (${sendResult.sent} sent, ${sendResult.failed} failed)`);
+          // Still schedule next occurrence for recurring
+          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "daily",
+              recurrenceTime: msg.recurrenceTime,
+              afterTimestamp: now,
+            });
+            await db.collection("scheduledMessages").add({
+              templateId: msg.templateId,
+              eventId: msg.eventId,
+              audienceType: msg.audienceType,
+              audienceId: msg.audienceId,
+              audienceIds: msg.audienceIds,
+              bodyOverride: msg.bodyOverride,
+              subjectOverride: msg.subjectOverride,
+              channels: msg.channels,
+              scheduledAt: nextAt,
+              status: "pending",
+              createdAt: now,
+              createdBy: msg.createdBy,
+              recurrence: "daily",
+              recurrenceTime: msg.recurrenceTime,
+            });
+          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "weekly",
+              recurrenceTime: msg.recurrenceTime,
+              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
+              afterTimestamp: now,
+            });
+            await db.collection("scheduledMessages").add({
+              templateId: msg.templateId,
+              eventId: msg.eventId,
+              audienceType: msg.audienceType,
+              audienceId: msg.audienceId,
+              audienceIds: msg.audienceIds,
+              bodyOverride: msg.bodyOverride,
+              subjectOverride: msg.subjectOverride,
+              channels: msg.channels,
+              scheduledAt: nextAt,
+              status: "pending",
+              createdAt: now,
+              createdBy: msg.createdBy,
+              recurrence: "weekly",
+              recurrenceTime: msg.recurrenceTime,
+              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
+            });
+          }
         } else {
           await db.collection("scheduledMessages").doc(msg.id).update({
             status: "failed",

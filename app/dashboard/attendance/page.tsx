@@ -30,7 +30,15 @@ export default function AttendancePage() {
   const [selectedDate, setSelectedDate] = useState(today());
   type PerTeamState = {
     members: { id: string; name: string }[];
-    record: { presentIds: string[]; absentIds: string[]; startTime?: string; endTime?: string; notes?: string } | null;
+    record: {
+      presentIds: string[];
+      absentIds: string[];
+      startTime?: string;
+      endTime?: string;
+      notes?: string;
+      submittedBy?: string;
+      submittedByName?: string;
+    } | null;
     choices: { id: string; present: boolean }[];
     startTime: string;
     endTime: string;
@@ -172,7 +180,11 @@ export default function AttendancePage() {
             ...prev,
             [teamId]: {
               members,
-              record: rec,
+              record: rec ? {
+                ...rec,
+                submittedBy: rec.submittedBy,
+                submittedByName: rec.submittedByName,
+              } : null,
               choices: members.map((m: { id: string }) => ({ id: m.id, present: presentIds.includes(m.id) })),
               startTime: rec?.startTime ?? "",
               endTime: rec?.endTime ?? "",
@@ -250,6 +262,8 @@ export default function AttendancePage() {
           startTime: data.startTime.trim() || undefined,
           endTime: data.endTime.trim() || undefined,
           notes: data.notes.trim() || undefined,
+          submittedBy: profile.id,
+          submittedByName: profile.name,
         };
         updateTeamData(teamId, (p) => ({ ...p, record }));
         toast("Attendance saved");
@@ -533,11 +547,17 @@ export default function AttendancePage() {
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {data.choices.map((c) => {
                           const name = data.members.find((m) => m.id === c.id)?.name ?? c.id;
+                          const alreadyMarkedPresent = c.present;
+                          const markedByName = alreadyMarkedPresent ? (data.record?.submittedByName ?? "someone") : null;
                           return (
-                            <label key={c.id} className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                            <label
+                              key={c.id}
+                              className={`flex min-h-[44px] items-center gap-2 text-sm ${alreadyMarkedPresent ? "cursor-default opacity-90" : "cursor-pointer"}`}
+                            >
                               <input
                                 type="checkbox"
                                 checked={c.present}
+                                disabled={alreadyMarkedPresent}
                                 onChange={() =>
                                   updateTeamData(tid, (p) => ({
                                     ...p,
@@ -546,9 +566,16 @@ export default function AttendancePage() {
                                     ),
                                   }))
                                 }
-                                className="rounded border-stone-300"
+                                className="rounded border-stone-300 disabled:opacity-60"
                               />
-                              {name}
+                              <span className={alreadyMarkedPresent ? "text-stone-500 dark:text-stone-400" : ""}>
+                                {name}
+                                {markedByName && (
+                                  <span className="ml-1 text-xs text-stone-400 dark:text-stone-500">
+                                    (marked by {markedByName})
+                                  </span>
+                                )}
+                              </span>
                             </label>
                           );
                         })}
@@ -609,6 +636,28 @@ function MemberAttendanceView({
       .then((d) => setVenueRequired(d.required === true))
       .catch(() => setVenueRequired(false));
   }, []);
+
+  // When venue requires location, try to get position on load (e.g. after refresh) if permission already granted
+  useEffect(() => {
+    if (venueRequired !== true || !navigator.geolocation) return;
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (!cancelled) {
+          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setLocationOk(true);
+          setLocationError(null);
+        }
+      },
+      () => {
+        if (!cancelled) setLocationOk(false);
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [venueRequired]);
 
   const requestLocation = () => {
     setLocationError(null);
@@ -730,7 +779,7 @@ function MemberAttendanceView({
         <p className="mb-4 text-sm text-stone-500">No location check is configured. You can mark attendance below.</p>
       )}
 
-      <div className={`space-y-4 ${!canMark ? "pointer-events-none opacity-60" : ""}`}>
+      <div className="space-y-4">
         {events.length > 0 ? (
           events.map((ev) => {
             const myTeamsInEvent = teams.filter((t) => ev.teamIds.includes(t.id) && myTeamIds.includes(t.id));
@@ -787,7 +836,7 @@ function MemberAttendanceView({
         )}
       </div>
       {!canMark && venueRequired === true && (
-        <p className="mt-4 text-sm text-stone-500">Enable location access above to mark attendance.</p>
+        <p className="mt-4 text-sm text-stone-500">Enable location access above to mark attendance. Your events and teams are listed above; use &quot;Allow location &amp; check&quot; to unlock the buttons.</p>
       )}
     </div>
   );

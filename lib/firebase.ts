@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getAuth, type Auth, type User } from "firebase/auth";
+import { getAuth, setPersistence, browserLocalPersistence, type Auth, type User } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -30,4 +30,15 @@ function getFirebaseAuth(): Auth {
 export const auth = getFirebaseAuth();
 export const isFirebaseConfigured =
   typeof window !== "undefined" && !!firebaseConfig.apiKey && !!firebaseConfig.projectId;
+
+/** Set auth to persist in local storage until sign out or 30-day expiry (handled in AuthContext). */
+export async function setAuthPersistence(): Promise<void> {
+  if (typeof window === "undefined" || !isFirebaseConfigured) return;
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch (e) {
+    console.warn("[Firebase] setPersistence failed:", e);
+  }
+}
+
 export default auth;

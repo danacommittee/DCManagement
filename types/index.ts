@@ -104,6 +104,8 @@ export interface ScheduledMessage {
   recurrence?: "daily" | "weekly" | null;
   recurrenceTime?: string; // "HH:mm" 24h
   recurrenceDayOfWeek?: number; // 0=Sun .. 6=Sat, for weekly
+  /** Optional end date for recurrence (YYYY-MM-DD). No next run is created after this date. */
+  recurrenceEndDate?: string | null;
 }
 
 export interface AttendanceRecord {

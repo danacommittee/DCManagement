@@ -49,6 +49,7 @@ export default function MessagesPage() {
   const [scheduleRecurrence, setScheduleRecurrence] = useState<"none" | "daily" | "weekly">("none");
   const [scheduleRecurrenceTime, setScheduleRecurrenceTime] = useState("09:00");
   const [scheduleRecurrenceDayOfWeek, setScheduleRecurrenceDayOfWeek] = useState(1); // Monday
+  const [scheduleRecurrenceEndDate, setScheduleRecurrenceEndDate] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [eventId, setEventId] = useState("");
   const [events, setEvents] = useState<{ id: string; name: string; teamIds?: string[] }[]>([]);
@@ -65,6 +66,10 @@ export default function MessagesPage() {
   const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
   const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
   const [editScheduleDateTime, setEditScheduleDateTime] = useState("");
+  const [editRecurrence, setEditRecurrence] = useState<"none" | "daily" | "weekly">("none");
+  const [editRecurrenceTime, setEditRecurrenceTime] = useState("09:00");
+  const [editRecurrenceDayOfWeek, setEditRecurrenceDayOfWeek] = useState(1);
+  const [editRecurrenceEndDate, setEditRecurrenceEndDate] = useState("");
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
   const hasHydratedLastUsed = useRef(false);
   const { toast } = useToast();
@@ -346,10 +351,12 @@ export default function MessagesPage() {
       if (scheduleRecurrence === "daily") {
         body.recurrence = "daily";
         body.recurrenceTime = scheduleRecurrenceTime;
+        if (scheduleRecurrenceEndDate.trim()) body.recurrenceEndDate = scheduleRecurrenceEndDate.trim().slice(0, 10);
       } else if (scheduleRecurrence === "weekly") {
         body.recurrence = "weekly";
         body.recurrenceTime = scheduleRecurrenceTime;
         body.recurrenceDayOfWeek = scheduleRecurrenceDayOfWeek;
+        if (scheduleRecurrenceEndDate.trim()) body.recurrenceEndDate = scheduleRecurrenceEndDate.trim().slice(0, 10);
       }
       const res = await fetch("/api/messages/schedule", {
         method: "POST",
@@ -377,6 +384,7 @@ export default function MessagesPage() {
         setScheduleRecurrence("none");
         setScheduleRecurrenceTime("09:00");
         setScheduleRecurrenceDayOfWeek(1);
+        setScheduleRecurrenceEndDate("");
         await fetchScheduledMessages(); // Refresh scheduled messages list
       } else {
         const msg = data.message || "Failed to schedule message";
@@ -689,6 +697,17 @@ export default function MessagesPage() {
                     />
                   </div>
                 )}
+                {(scheduleRecurrence === "daily" || scheduleRecurrence === "weekly") && (
+                  <div className="mt-2">
+                    <label className="mr-2 text-sm text-stone-600 dark:text-stone-400">End date (optional)</label>
+                    <input
+                      type="date"
+                      value={scheduleRecurrenceEndDate}
+                      onChange={(e) => setScheduleRecurrenceEndDate(e.target.value)}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
@@ -707,6 +726,7 @@ export default function MessagesPage() {
                     setScheduleRecurrence("none");
                     setScheduleRecurrenceTime("09:00");
                     setScheduleRecurrenceDayOfWeek(1);
+                    setScheduleRecurrenceEndDate("");
                   }}
                   className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
                 >
@@ -857,6 +877,15 @@ export default function MessagesPage() {
                           <p>
                             <span className="font-medium">Audience:</span> {msg.audienceType === "entire_team" ? "Entire Team" : msg.audienceType === "sub_team" ? "Sub-team" : "Individual"}
                           </p>
+                          {(msg.recurrence === "daily" || msg.recurrence === "weekly") && (
+                            <p>
+                              <span className="font-medium">Recurring:</span>{" "}
+                              {msg.recurrence === "daily"
+                                ? `Every day at ${msg.recurrenceTime ?? "—"}`
+                                : `Every ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][msg.recurrenceDayOfWeek ?? 0]} at ${msg.recurrenceTime ?? "—"}`}
+                              {msg.recurrenceEndDate ? ` until ${msg.recurrenceEndDate}` : ""}
+                            </p>
+                          )}
                           {msg.error && (
                             <p className="text-red-600 dark:text-red-400">
                               <span className="font-medium">Error:</span> {msg.error}
@@ -870,54 +899,66 @@ export default function MessagesPage() {
                         </div>
                       </div>
                       <div className="ml-4 flex gap-2">
-                        {msg.status === "pending" && (
-                          <>
+                        {(() => {
+                          const isRecurring = msg.recurrence === "daily" || msg.recurrence === "weekly";
+                          const endDate = typeof msg.recurrenceEndDate === "string" ? msg.recurrenceEndDate.slice(0, 10) : null;
+                          const todayStr = new Date().toISOString().slice(0, 10);
+                          const pastEndDate = endDate != null && endDate !== "" && todayStr > endDate;
+                          const showEdit =
+                            msg.status === "pending" ||
+                            (isRecurring && (msg.status === "sent" || msg.status === "failed") && !pastEndDate);
+                          return showEdit ? (
                             <button
                               type="button"
-                              onClick={() => {
-                                setEditingScheduledId(msg.id);
-                                setEditScheduleDateTime(toLocalDatetimeLocalString(new Date(msg.scheduledAt)));
-                              }}
+                            onClick={() => {
+                              setEditingScheduledId(msg.id);
+                              const nextDate = msg.status === "pending" ? msg.scheduledAt : Date.now() + 60 * 60 * 1000;
+                              setEditScheduleDateTime(toLocalDatetimeLocalString(new Date(nextDate)));
+                              setEditRecurrence((msg.recurrence === "daily" || msg.recurrence === "weekly") ? msg.recurrence : "none");
+                              setEditRecurrenceTime(msg.recurrenceTime ?? "09:00");
+                              setEditRecurrenceDayOfWeek(typeof msg.recurrenceDayOfWeek === "number" ? msg.recurrenceDayOfWeek : 1);
+                              setEditRecurrenceEndDate(typeof msg.recurrenceEndDate === "string" ? msg.recurrenceEndDate.slice(0, 10) : "");
+                            }}
                               className="rounded border border-stone-300 px-3 py-1.5 text-xs text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
                             >
                               Edit
                             </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                if (!confirm("Delete this scheduled message?")) return;
-                                try {
-                                  const headers = await getAuthHeaders();
-                                  const res = await fetch(`/api/messages/schedule/${msg.id}`, {
-                                    method: "DELETE",
-                                    headers,
-                                  });
-                                  if (res.ok) {
-                                    await fetchScheduledMessages();
-                                    setSuccess({
-                                      message: "Scheduled message deleted",
-                                      sent: 0,
-                                      failed: 0,
-                                      recipientCount: 0,
-                                    });
-                                    toast("Scheduled message deleted");
-                                  } else {
-                                    const data = await res.json().catch(() => ({}));
-                                    const err = data.error || "Failed to delete scheduled message";
-                                    setError(err);
-                                    toast(err, "error");
-                                  }
-                                } catch (e) {
-                                  setError("Failed to delete scheduled message");
-                                  toast("Failed to delete scheduled message", "error");
-                                }
-                              }}
-                              className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/20"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
+                          ) : null;
+                        })()}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm("Delete this scheduled message?")) return;
+                            try {
+                              const headers = await getAuthHeaders();
+                              const res = await fetch(`/api/messages/schedule/${msg.id}`, {
+                                method: "DELETE",
+                                headers,
+                              });
+                              if (res.ok) {
+                                await fetchScheduledMessages();
+                                setSuccess({
+                                  message: "Scheduled message deleted",
+                                  sent: 0,
+                                  failed: 0,
+                                  recipientCount: 0,
+                                });
+                                toast("Scheduled message deleted");
+                              } else {
+                                const data = await res.json().catch(() => ({}));
+                                const err = data.error || "Failed to delete scheduled message";
+                                setError(err);
+                                toast(err, "error");
+                              }
+                            } catch (e) {
+                              setError("Failed to delete scheduled message");
+                              toast("Failed to delete scheduled message", "error");
+                            }
+                          }}
+                          className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/20"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                     
@@ -934,6 +975,66 @@ export default function MessagesPage() {
                           min={toLocalDatetimeLocalString(new Date())}
                           className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                         />
+                        <div className="mb-3">
+                          <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Recurring</label>
+                          <div className="flex flex-wrap gap-3">
+                            {(["none", "daily", "weekly"] as const).map((opt) => (
+                              <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm">
+                                <input
+                                  type="radio"
+                                  name={`editRecurrence-${msg.id}`}
+                                  checked={editRecurrence === opt}
+                                  onChange={() => setEditRecurrence(opt)}
+                                  className="rounded border-stone-300"
+                                />
+                                <span>{opt === "none" ? "One-time" : opt === "daily" ? "Every day" : "Every week"}</span>
+                              </label>
+                            ))}
+                          </div>
+                          {editRecurrence === "daily" && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-sm text-stone-500">at</span>
+                              <input
+                                type="time"
+                                value={editRecurrenceTime}
+                                onChange={(e) => setEditRecurrenceTime(e.target.value)}
+                                className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                              />
+                            </div>
+                          )}
+                          {editRecurrence === "weekly" && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <span className="text-sm text-stone-500">Every</span>
+                              <select
+                                value={editRecurrenceDayOfWeek}
+                                onChange={(e) => setEditRecurrenceDayOfWeek(Number(e.target.value))}
+                                className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                              >
+                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, i) => (
+                                  <option key={day} value={i}>{day}</option>
+                                ))}
+                              </select>
+                              <span className="text-sm text-stone-500">at</span>
+                              <input
+                                type="time"
+                                value={editRecurrenceTime}
+                                onChange={(e) => setEditRecurrenceTime(e.target.value)}
+                                className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:text-white"
+                              />
+                            </div>
+                          )}
+                          {(editRecurrence === "daily" || editRecurrence === "weekly") && (
+                            <div className="mt-2">
+                              <label className="mr-2 text-sm text-stone-500">End date (optional)</label>
+                              <input
+                                type="date"
+                                value={editRecurrenceEndDate}
+                                onChange={(e) => setEditRecurrenceEndDate(e.target.value)}
+                                className="rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                              />
+                            </div>
+                          )}
+                        </div>
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -947,14 +1048,32 @@ export default function MessagesPage() {
                               }
                               try {
                                 const headers = await getAuthHeaders();
+                                const body: Record<string, unknown> = { scheduledAt: newTimestamp };
+                                if (editRecurrence === "none") {
+                                  body.recurrence = null;
+                                  body.recurrenceEndDate = null;
+                                } else if (editRecurrence === "daily") {
+                                  body.recurrence = "daily";
+                                  body.recurrenceTime = editRecurrenceTime;
+                                  body.recurrenceEndDate = editRecurrenceEndDate.trim() || null;
+                                } else {
+                                  body.recurrence = "weekly";
+                                  body.recurrenceTime = editRecurrenceTime;
+                                  body.recurrenceDayOfWeek = editRecurrenceDayOfWeek;
+                                  body.recurrenceEndDate = editRecurrenceEndDate.trim() || null;
+                                }
                                 const res = await fetch(`/api/messages/schedule/${msg.id}`, {
                                   method: "PATCH",
                                   headers,
-                                  body: JSON.stringify({ scheduledAt: newTimestamp }),
+                                  body: JSON.stringify(body),
                                 });
                                 if (res.ok) {
                                   setEditingScheduledId(null);
                                   setEditScheduleDateTime("");
+                                  setEditRecurrence("none");
+                                  setEditRecurrenceTime("09:00");
+                                  setEditRecurrenceDayOfWeek(1);
+                                  setEditRecurrenceEndDate("");
                                   await fetchScheduledMessages();
                                   setSuccess({
                                     message: "Scheduled message updated",
@@ -983,6 +1102,10 @@ export default function MessagesPage() {
                             onClick={() => {
                               setEditingScheduledId(null);
                               setEditScheduleDateTime("");
+                              setEditRecurrence("none");
+                              setEditRecurrenceTime("09:00");
+                              setEditRecurrenceDayOfWeek(1);
+                              setEditRecurrenceEndDate("");
                             }}
                             className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
                           >

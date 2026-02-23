@@ -29,30 +29,53 @@ export async function PATCH(
     }
     
     const msgData = msgSnap.data()!;
-    
-    // Only allow editing pending messages
-    if (msgData.status !== "pending") {
-      return NextResponse.json({ error: "Can only edit pending messages" }, { status: 400 });
+    const status = msgData.status as string;
+    const recurrence = msgData.recurrence as string | undefined;
+    const recurrenceEndDate = typeof msgData.recurrenceEndDate === "string" ? msgData.recurrenceEndDate.slice(0, 10) : null;
+    const isRecurring = recurrence === "daily" || recurrence === "weekly";
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const pastEndDate = recurrenceEndDate != null && recurrenceEndDate !== "" && todayStr > recurrenceEndDate;
+
+    // Allow editing: pending messages, or sent/failed recurring messages until their end date (if any)
+    const canEdit =
+      status === "pending" ||
+      (isRecurring && (status === "sent" || status === "failed") && !pastEndDate);
+    if (!canEdit) {
+      return NextResponse.json(
+        { error: pastEndDate ? "Recurring series has ended" : "Can only edit pending or recurring messages" },
+        { status: 400 }
+      );
     }
-    
+
     // Only allow creator or super_admin to edit
     if (msgData.createdBy !== myId && role !== "super_admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
-    
-    // Allow updating scheduledAt if provided
-    if (typeof body.scheduledAt === "number") {
+
+    // When rescheduling a sent/failed recurring message, set it back to pending and require new scheduledAt
+    if (status === "sent" || status === "failed") {
+      if (typeof body.scheduledAt !== "number" || body.scheduledAt <= Date.now()) {
+        return NextResponse.json({ error: "scheduledAt (future timestamp) is required to reschedule this recurring message" }, { status: 400 });
+      }
+      updates.status = "pending";
+      updates.scheduledAt = body.scheduledAt;
+      updates.sentAt = null;
+      updates.error = null;
+    }
+
+    // scheduledAt (for pending messages)
+    if (status === "pending" && typeof body.scheduledAt === "number") {
       if (body.scheduledAt <= Date.now()) {
         return NextResponse.json({ error: "scheduledAt must be in the future" }, { status: 400 });
       }
       updates.scheduledAt = body.scheduledAt;
     }
-    
-    // Allow updating channels if provided
+
+    // channels
     if (Array.isArray(body.channels)) {
-      const channels = body.channels.filter((c: string): c is "email" | "sms" | "whatsapp" => 
+      const channels = body.channels.filter((c: string): c is "email" | "sms" | "whatsapp" =>
         ["email", "sms", "whatsapp"].includes(c)
       );
       if (channels.length === 0) {
@@ -60,6 +83,50 @@ export async function PATCH(
       }
       updates.channels = channels;
     }
+
+    // recurrence (only set defined; omit undefined so Firestore is happy)
+    if (body.recurrence === "daily" || body.recurrence === "weekly" || body.recurrence === null || body.recurrence === undefined) {
+      if (body.recurrence === "daily") {
+        updates.recurrence = "daily";
+        if (typeof body.recurrenceTime === "string" && body.recurrenceTime.trim()) {
+          updates.recurrenceTime = body.recurrenceTime.trim();
+        }
+        updates.recurrenceDayOfWeek = null; // clear for daily
+      } else if (body.recurrence === "weekly") {
+        updates.recurrence = "weekly";
+        if (typeof body.recurrenceTime === "string" && body.recurrenceTime.trim()) {
+          updates.recurrenceTime = body.recurrenceTime.trim();
+        }
+        if (typeof body.recurrenceDayOfWeek === "number" && body.recurrenceDayOfWeek >= 0 && body.recurrenceDayOfWeek <= 6) {
+          updates.recurrenceDayOfWeek = body.recurrenceDayOfWeek;
+        }
+      } else {
+        updates.recurrence = null;
+        updates.recurrenceTime = null;
+        updates.recurrenceDayOfWeek = null;
+        updates.recurrenceEndDate = null;
+      }
+    }
+    if (body.recurrenceEndDate !== undefined) {
+      updates.recurrenceEndDate = body.recurrenceEndDate ? String(body.recurrenceEndDate).trim().slice(0, 10) : null;
+    }
+
+    // optional fields (only set if provided; do not write undefined)
+    if (typeof body.templateId === "string" && body.templateId.trim()) {
+      const templateSnap = await db.collection("templates").doc(body.templateId.trim()).get();
+      if (!templateSnap.exists) {
+        return NextResponse.json({ error: "Template not found" }, { status: 404 });
+      }
+      updates.templateId = body.templateId.trim();
+    }
+    if (body.eventId !== undefined) updates.eventId = body.eventId ? String(body.eventId).trim() : null;
+    if (["individual", "sub_team", "entire_team"].includes(body.audienceType)) updates.audienceType = body.audienceType;
+    if (body.audienceId !== undefined) updates.audienceId = body.audienceId ? String(body.audienceId).trim() : null;
+    if (body.audienceIds !== undefined) {
+      updates.audienceIds = Array.isArray(body.audienceIds) ? body.audienceIds.filter((id: unknown) => typeof id === "string").map((id: string) => String(id).trim()) : null;
+    }
+    if (body.bodyOverride !== undefined) updates.bodyOverride = body.bodyOverride ? String(body.bodyOverride).trim() : null;
+    if (body.subjectOverride !== undefined) updates.subjectOverride = body.subjectOverride ? String(body.subjectOverride).trim() : null;
 
     await db.collection("scheduledMessages").doc(id).update(updates);
     return NextResponse.json({ ok: true });
@@ -97,12 +164,7 @@ export async function DELETE(
     
     const msgData = msgSnap.data()!;
     
-    // Only allow deleting pending or sending messages (not sent/failed)
-    if (msgData.status === "sent") {
-      return NextResponse.json({ error: "Cannot delete sent messages" }, { status: 400 });
-    }
-    
-    // Only allow creator or super_admin to delete
+    // Allow creator or super_admin to delete (any status, including sent/failed e.g. to stop recurring or cleanup)
     if (msgData.createdBy !== myId && role !== "super_admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

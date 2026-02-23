@@ -27,6 +27,37 @@ function getNextScheduledAt(opts: {
   return next.getTime();
 }
 
+/** Build Firestore-safe payload for next recurring occurrence (no undefined values). */
+function nextRecurrencePayload(msg: ScheduledMessage, nextAt: number, now: number): Record<string, unknown> {
+  const o: Record<string, unknown> = {
+    templateId: msg.templateId,
+    audienceType: msg.audienceType,
+    channels: msg.channels,
+    scheduledAt: nextAt,
+    status: "pending",
+    createdAt: now,
+    createdBy: msg.createdBy,
+    recurrence: msg.recurrence,
+    recurrenceTime: msg.recurrenceTime,
+  };
+  if (msg.eventId != null && msg.eventId !== "") o.eventId = msg.eventId;
+  if (msg.audienceId != null && msg.audienceId !== "") o.audienceId = msg.audienceId;
+  if (Array.isArray(msg.audienceIds) && msg.audienceIds.length > 0) o.audienceIds = msg.audienceIds;
+  if (msg.bodyOverride != null && msg.bodyOverride !== "") o.bodyOverride = msg.bodyOverride;
+  if (msg.subjectOverride != null && msg.subjectOverride !== "") o.subjectOverride = msg.subjectOverride;
+  if (msg.recurrence === "weekly" && msg.recurrenceDayOfWeek != null) o.recurrenceDayOfWeek = msg.recurrenceDayOfWeek;
+  if (msg.recurrenceEndDate != null && String(msg.recurrenceEndDate).trim() !== "") o.recurrenceEndDate = String(msg.recurrenceEndDate).trim().slice(0, 10);
+  return o;
+}
+
+/** True if next run date (as YYYY-MM-DD) is past recurrenceEndDate. */
+function isPastRecurrenceEnd(nextAt: number, recurrenceEndDate: string | null | undefined): boolean {
+  if (recurrenceEndDate == null || String(recurrenceEndDate).trim() === "") return false;
+  const endStr = String(recurrenceEndDate).trim().slice(0, 10);
+  const nextStr = new Date(nextAt).toISOString().slice(0, 10);
+  return nextStr > endStr;
+}
+
 /**
  * This endpoint processes scheduled messages that are due to be sent.
  * It should be called periodically (e.g., via Vercel Cron Jobs or external cron service).
@@ -102,6 +133,26 @@ export async function GET(req: NextRequest) {
       try {
         console.log(`[Process Scheduled] Processing message ${msg.id}, scheduled for ${new Date(msg.scheduledAt).toISOString()}`);
         
+        // Validate audience so we don't send with missing required data (and avoid null/Firestore issues)
+        if (msg.audienceType === "sub_team" && (msg.audienceId == null || String(msg.audienceId).trim() === "")) {
+          await db.collection("scheduledMessages").doc(msg.id).update({
+            status: "failed",
+            error: "Sub-team audience requires a team (audienceId).",
+            sentAt: Date.now(),
+          });
+          failed++;
+          continue;
+        }
+        if (msg.audienceType === "individual" && (!Array.isArray(msg.audienceIds) || msg.audienceIds.length === 0)) {
+          await db.collection("scheduledMessages").doc(msg.id).update({
+            status: "failed",
+            error: "Individual audience requires at least one member (audienceIds).",
+            sentAt: Date.now(),
+          });
+          failed++;
+          continue;
+        }
+
         // Mark as sending
         await db.collection("scheduledMessages").doc(msg.id).update({
           status: "sending",
@@ -124,8 +175,8 @@ export async function GET(req: NextRequest) {
           templateId: msg.templateId,
           eventId: msg.eventId || null,
           audienceType: msg.audienceType,
-          audienceId: msg.audienceId,
-          audienceIds: Array.isArray(msg.audienceIds) ? msg.audienceIds : undefined,
+          audienceId: msg.audienceId != null && String(msg.audienceId).trim() !== "" ? msg.audienceId : undefined,
+          audienceIds: Array.isArray(msg.audienceIds) && msg.audienceIds.length > 0 ? msg.audienceIds : undefined,
           bodyOverride: typeof msg.bodyOverride === "string" ? msg.bodyOverride : undefined,
           subjectOverride: typeof msg.subjectOverride === "string" ? msg.subjectOverride : undefined,
           channels: msg.channels,
@@ -141,30 +192,17 @@ export async function GET(req: NextRequest) {
           });
           processed++;
           console.log(`[Process Scheduled] Successfully sent message ${msg.id}`);
-          // Schedule next occurrence for recurring
+          // Schedule next occurrence for recurring (unless past recurrenceEndDate)
           if (msg.recurrence === "daily" && msg.recurrenceTime) {
             const nextAt = getNextScheduledAt({
               recurrence: "daily",
               recurrenceTime: msg.recurrenceTime,
               afterTimestamp: now,
             });
-            await db.collection("scheduledMessages").add({
-              templateId: msg.templateId,
-              eventId: msg.eventId,
-              audienceType: msg.audienceType,
-              audienceId: msg.audienceId,
-              audienceIds: msg.audienceIds,
-              bodyOverride: msg.bodyOverride,
-              subjectOverride: msg.subjectOverride,
-              channels: msg.channels,
-              scheduledAt: nextAt,
-              status: "pending",
-              createdAt: now,
-              createdBy: msg.createdBy,
-              recurrence: "daily",
-              recurrenceTime: msg.recurrenceTime,
-            });
-            console.log(`[Process Scheduled] Created next daily run at ${new Date(nextAt).toISOString()}`);
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+              console.log(`[Process Scheduled] Created next daily run at ${new Date(nextAt).toISOString()}`);
+            }
           } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
             const nextAt = getNextScheduledAt({
               recurrence: "weekly",
@@ -172,24 +210,10 @@ export async function GET(req: NextRequest) {
               recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
               afterTimestamp: now,
             });
-            await db.collection("scheduledMessages").add({
-              templateId: msg.templateId,
-              eventId: msg.eventId,
-              audienceType: msg.audienceType,
-              audienceId: msg.audienceId,
-              audienceIds: msg.audienceIds,
-              bodyOverride: msg.bodyOverride,
-              subjectOverride: msg.subjectOverride,
-              channels: msg.channels,
-              scheduledAt: nextAt,
-              status: "pending",
-              createdAt: now,
-              createdBy: msg.createdBy,
-              recurrence: "weekly",
-              recurrenceTime: msg.recurrenceTime,
-              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
-            });
-            console.log(`[Process Scheduled] Created next weekly run at ${new Date(nextAt).toISOString()}`);
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+              console.log(`[Process Scheduled] Created next weekly run at ${new Date(nextAt).toISOString()}`);
+            }
           }
         } else if (sendResult.ok && sendResult.sent > 0) {
           // Partial success - some sent, some failed
@@ -207,22 +231,9 @@ export async function GET(req: NextRequest) {
               recurrenceTime: msg.recurrenceTime,
               afterTimestamp: now,
             });
-            await db.collection("scheduledMessages").add({
-              templateId: msg.templateId,
-              eventId: msg.eventId,
-              audienceType: msg.audienceType,
-              audienceId: msg.audienceId,
-              audienceIds: msg.audienceIds,
-              bodyOverride: msg.bodyOverride,
-              subjectOverride: msg.subjectOverride,
-              channels: msg.channels,
-              scheduledAt: nextAt,
-              status: "pending",
-              createdAt: now,
-              createdBy: msg.createdBy,
-              recurrence: "daily",
-              recurrenceTime: msg.recurrenceTime,
-            });
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+            }
           } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
             const nextAt = getNextScheduledAt({
               recurrence: "weekly",
@@ -230,23 +241,9 @@ export async function GET(req: NextRequest) {
               recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
               afterTimestamp: now,
             });
-            await db.collection("scheduledMessages").add({
-              templateId: msg.templateId,
-              eventId: msg.eventId,
-              audienceType: msg.audienceType,
-              audienceId: msg.audienceId,
-              audienceIds: msg.audienceIds,
-              bodyOverride: msg.bodyOverride,
-              subjectOverride: msg.subjectOverride,
-              channels: msg.channels,
-              scheduledAt: nextAt,
-              status: "pending",
-              createdAt: now,
-              createdBy: msg.createdBy,
-              recurrence: "weekly",
-              recurrenceTime: msg.recurrenceTime,
-              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
-            });
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+            }
           }
         } else {
           await db.collection("scheduledMessages").doc(msg.id).update({

@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     const recurrenceDayOfWeek = typeof body.recurrenceDayOfWeek === "number" && body.recurrenceDayOfWeek >= 0 && body.recurrenceDayOfWeek <= 6
       ? body.recurrenceDayOfWeek
       : undefined;
+    const recurrenceEndDate = typeof body.recurrenceEndDate === "string" ? body.recurrenceEndDate.trim().slice(0, 10) : undefined;
 
     if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType)) {
       return NextResponse.json({ error: "Invalid templateId or audienceType" }, { status: 400 });
@@ -91,6 +92,7 @@ export async function POST(req: NextRequest) {
       scheduledMessage.recurrence = recurrence;
       if (recurrenceTime) scheduledMessage.recurrenceTime = recurrenceTime;
       if (recurrenceDayOfWeek !== undefined) scheduledMessage.recurrenceDayOfWeek = recurrenceDayOfWeek;
+      if (recurrenceEndDate) scheduledMessage.recurrenceEndDate = recurrenceEndDate;
     }
 
     const ref = await db.collection("scheduledMessages").add(scheduledMessage);

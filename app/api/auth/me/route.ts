@@ -58,6 +58,20 @@ export async function GET(req: NextRequest) {
     const data = doc.data();
     const computedName = [data.title, data.firstName, data.lastName].filter(Boolean).join(" ") || data.email || "";
     const name = data.name != null ? data.name : computedName;
+    // Normalize role to one of "member" | "admin" | "super_admin"
+    const rawRole = data.role;
+    let role: "member" | "admin" | "super_admin";
+    if (typeof rawRole === "string") {
+      const normalized = rawRole.trim().toLowerCase().replace(/\s+/g, "_");
+      if (normalized === "admin" || normalized === "super_admin") {
+        role = normalized;
+      } else {
+        role = "member";
+      }
+    } else {
+      role = "member";
+    }
+
     const member = {
       id: doc.id,
       title: data.title != null ? data.title : "",
@@ -67,7 +81,7 @@ export async function GET(req: NextRequest) {
       email: data.email,
       name,
       phone: data.phone != null ? data.phone : "",
-      role: data.role != null ? data.role : "member",
+      role,
       teamIds: Array.isArray(data.teamIds) ? data.teamIds : [],
     };
     return NextResponse.json({ member });

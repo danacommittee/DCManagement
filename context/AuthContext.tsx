@@ -122,7 +122,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Sign-in failed");
+      const message = e instanceof Error ? e.message : "Sign-in failed";
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "auth/web-storage-unsupported") {
+        setError(
+          "Your browser is blocking login (storage is disabled). Please open this link in your device's main browser (Safari/Chrome) instead of an in-app browser."
+        );
+      } else {
+        setError(message);
+      }
     }
   };
 

@@ -76,11 +76,13 @@ export default function AttendancePage() {
     if (!profile) return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const [teamsRes, eventsRes, membersRes] = await Promise.all([
+      // Members get 403 from /api/members; only leaders need the full member list for attendance
+      const fetches = [
         fetch("/api/teams", { headers }),
         fetch("/api/events?limit=100", { headers }),
-        fetch("/api/members", { headers }),
-      ]);
+        ...(canManageAttendance ? [fetch("/api/members", { headers })] : []),
+      ];
+      const [teamsRes, eventsRes, ...rest] = await Promise.all(fetches);
       if (teamsRes.ok) {
         const d = await teamsRes.json();
         setTeams(Array.isArray(d.teams) ? d.teams : []);
@@ -89,14 +91,17 @@ export default function AttendancePage() {
         const d = await eventsRes.json();
         setEvents(d.events ?? []);
       }
-      if (membersRes?.ok) {
-        const d = await membersRes.json();
-        setAllMembers(d.members ?? []);
+      if (canManageAttendance && rest[0]) {
+        const membersRes = rest[0] as Response;
+        if (membersRes.ok) {
+          const d = await membersRes.json();
+          setAllMembers(d.members ?? []);
+        }
       }
       setLoading(false);
     };
     run();
-  }, [profile?.id]);
+  }, [profile?.id, canManageAttendance]);
 
   useEffect(() => {
     if (canManageAttendance && urlEventId) setSelectedEventId(urlEventId);
@@ -328,19 +333,21 @@ export default function AttendancePage() {
 
   if (!profile) return null;
 
-  // ——— Member: calendar-linked or events including today ———
+  // ——— Member: events started (today or past days) ———
   if (isMember) {
-    const todayEvents = events.filter((e) => {
+    const startedEvents = events.filter((e) => {
       const from = e.dateFrom.slice(0, 10);
-      const to = e.dateTo.slice(0, 10);
-      return today() >= from && today() <= to;
+      return today() >= from;
     });
+    // Use teams from API as source of truth for "my teams" (API already filters to member's teams by team.memberIds)
+    const memberTeamIds = teams.map((t) => t.id);
     return (
       <MemberAttendanceView
         teams={teams}
-        events={todayEvents}
+        events={startedEvents}
         allEvents={events}
-        myTeamIds={profile?.teamIds ?? []}
+        myTeamIds={memberTeamIds}
+        myMemberId={profile.id}
         urlEventId={urlEventId || undefined}
         urlDate={urlDate && urlDate <= today() ? urlDate : undefined}
       />
@@ -547,17 +554,15 @@ export default function AttendancePage() {
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {data.choices.map((c) => {
                           const name = data.members.find((m) => m.id === c.id)?.name ?? c.id;
-                          const alreadyMarkedPresent = c.present;
-                          const markedByName = alreadyMarkedPresent ? (data.record?.submittedByName ?? "someone") : null;
+                          const markedByName = data.record?.submittedByName ?? null;
                           return (
                             <label
                               key={c.id}
-                              className={`flex min-h-[44px] items-center gap-2 text-sm ${alreadyMarkedPresent ? "cursor-default opacity-90" : "cursor-pointer"}`}
+                              className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm"
                             >
                               <input
                                 type="checkbox"
                                 checked={c.present}
-                                disabled={alreadyMarkedPresent}
                                 onChange={() =>
                                   updateTeamData(tid, (p) => ({
                                     ...p,
@@ -566,11 +571,11 @@ export default function AttendancePage() {
                                     ),
                                   }))
                                 }
-                                className="rounded border-stone-300 disabled:opacity-60"
+                                className="rounded border-stone-300"
                               />
-                              <span className={alreadyMarkedPresent ? "text-stone-500 dark:text-stone-400" : ""}>
+                              <span>
                                 {name}
-                                {markedByName && (
+                                {markedByName && c.present && (
                                   <span className="ml-1 text-xs text-stone-400 dark:text-stone-500">
                                     (marked by {markedByName})
                                   </span>
@@ -605,6 +610,7 @@ function MemberAttendanceView({
   events,
   allEvents,
   myTeamIds,
+  myMemberId,
   urlEventId,
   urlDate,
 }: {
@@ -612,6 +618,7 @@ function MemberAttendanceView({
   events: Event[];
   allEvents: Event[];
   myTeamIds: string[];
+  myMemberId: string;
   urlEventId?: string;
   urlDate?: string;
 }) {
@@ -621,14 +628,55 @@ function MemberAttendanceView({
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
   const [marked, setMarked] = useState<Record<string, boolean>>({});
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [eventDateById, setEventDateById] = useState<Record<string, string>>({});
 
   const eventTeamKey = (eventId: string, teamId: string, dateStr?: string) =>
     dateStr ? `${eventId}:${teamId}:${dateStr}` : `${eventId}:${teamId}`;
 
+  const weekdayForDate = (dateStr: string): string => {
+    try {
+      return new Date(dateStr + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
+    } catch {
+      return "";
+    }
+  };
+
+  // For a given event + team, decide if the current member is in that team for this event,
+  // honoring per-event teamOverrides if present; otherwise fall back to base team membership.
+  const isInTeamForEvent = (ev: Event, teamId: string): boolean => {
+    const team = teams.find((t) => t.id === teamId);
+    const overrides = (ev.teamOverrides as Record<string, { memberIds?: string[] }> | undefined) ?? undefined;
+    const overrideForTeam = overrides?.[teamId];
+    if (overrideForTeam && Array.isArray(overrideForTeam.memberIds)) {
+      return overrideForTeam.memberIds.includes(myMemberId);
+    }
+    return team ? team.memberIds.includes(myMemberId) : false;
+  };
+
   const focusedEvent = urlEventId && urlDate
     ? allEvents.find((e) => e.id === urlEventId && urlDate >= e.dateFrom.slice(0, 10) && urlDate <= e.dateTo.slice(0, 10))
     : null;
-  const focusedEventTeams = focusedEvent ? teams.filter((t) => focusedEvent.teamIds.includes(t.id) && myTeamIds.includes(t.id)) : [];
+  const focusedEventTeams = focusedEvent
+    ? teams.filter((t) => focusedEvent.teamIds.includes(t.id) && isInTeamForEvent(focusedEvent, t.id))
+    : [];
+
+  // Default each event's selected date to today (if in range) otherwise latest allowed date <= today
+  useEffect(() => {
+    if (!events || events.length === 0) return;
+    setEventDateById((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const ev of events) {
+        if (next[ev.id]) continue;
+        const allowed = getDatesInRange(ev.dateFrom, ev.dateTo).filter((d) => d <= today());
+        if (allowed.length === 0) continue;
+        const defaultDate = allowed.includes(today()) ? today() : allowed[allowed.length - 1];
+        next[ev.id] = defaultDate;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [events]);
 
   useEffect(() => {
     fetch("/api/attendance/venue")
@@ -720,33 +768,43 @@ function MemberAttendanceView({
       </p>
 
       {focusedEvent && urlDate && (
-        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-          <p className="mb-2 font-medium text-amber-900 dark:text-amber-200">{focusedEvent.name} — {urlDate}</p>
-          <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">Mark attendance for your team(s) on this day:</p>
-          <ul className="space-y-2">
-            {focusedEventTeams.map((t) => {
-              const key = eventTeamKey(focusedEvent.id, t.id, urlDate);
-              return (
-                <li key={t.id} className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm text-stone-700 dark:text-stone-300">{t.name}</span>
-                  {marked[key] ? (
-                    <span className="text-sm text-green-600 dark:text-green-400">Marked present</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => markSelfPresent(t.id, focusedEvent.id, urlDate)}
-                      disabled={!canMark || submitting[key]}
-                      className="min-h-[44px] rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-                    >
-                      {submitting[key] ? "Saving…" : "Mark present"}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {focusedEventTeams.length === 0 && (
-            <p className="text-sm text-amber-700 dark:text-amber-300">You are not in any team for this event.</p>
+        <div className="mb-6">
+          <p className="mb-1 font-medium text-stone-900 dark:text-white">{focusedEvent.name}</p>
+          <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">
+            Marking for <span className="font-medium text-stone-700 dark:text-stone-300">{weekdayForDate(urlDate)}</span>, {urlDate}
+          </p>
+          <p className="mb-4 text-sm text-stone-500 dark:text-stone-400">Mark attendance for your team(s) on this day:</p>
+          {focusedEventTeams.length === 0 ? (
+            <p className="text-sm text-stone-500 dark:text-stone-400">You are not in any team for this event.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {focusedEventTeams.map((t) => {
+                const key = eventTeamKey(focusedEvent.id, t.id, urlDate);
+                return (
+                  <div
+                    key={t.id}
+                    className="flex flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-600 dark:bg-stone-800"
+                  >
+                    <p className="mb-3 font-medium text-stone-900 dark:text-white">{t.name}</p>
+                    {marked[key] ? (
+                      <p className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                        <span className="inline-block h-2 w-2 rounded-full bg-green-500" aria-hidden />
+                        Marked present
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => markSelfPresent(t.id, focusedEvent.id, urlDate)}
+                        disabled={!canMark || submitting[key]}
+                        className="mt-auto min-h-[44px] w-full rounded-lg bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {submitting[key] ? "Saving…" : "Mark present"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -782,57 +840,98 @@ function MemberAttendanceView({
       <div className="space-y-4">
         {events.length > 0 ? (
           events.map((ev) => {
-            const myTeamsInEvent = teams.filter((t) => ev.teamIds.includes(t.id) && myTeamIds.includes(t.id));
+            const myTeamsInEvent = teams.filter(
+              (t) => ev.teamIds.includes(t.id) && isInTeamForEvent(ev, t.id)
+            );
             if (myTeamsInEvent.length === 0) return null;
+            const allowedDates = getDatesInRange(ev.dateFrom, ev.dateTo).filter((d) => d <= today());
+            const selectedDate = eventDateById[ev.id] && allowedDates.includes(eventDateById[ev.id])
+              ? eventDateById[ev.id]
+              : (allowedDates.includes(today()) ? today() : allowedDates[allowedDates.length - 1]);
             return (
-              <Card key={ev.id}>
+              <Card key={ev.id} className="overflow-hidden">
                 <p className="mb-2 font-medium text-stone-900 dark:text-white">{ev.name}</p>
-                <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">Today is within this event. Mark attendance for your team(s):</p>
-                <ul className="space-y-2">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-stone-500 dark:text-stone-400">Choose a day (today or past) to mark attendance:</p>
+                    <p className="mt-1 text-sm text-stone-700 dark:text-stone-300">
+                      Marking for <span className="font-medium">{weekdayForDate(selectedDate)}</span>, {selectedDate}
+                    </p>
+                  </div>
+                  <div className="min-w-[220px]">
+                    <label className="mb-1 block text-xs text-stone-500 dark:text-stone-400">Day</label>
+                    <select
+                      value={selectedDate}
+                      onChange={(e) => setEventDateById((p) => ({ ...p, [ev.id]: e.target.value }))}
+                      className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    >
+                      {allowedDates.map((d) => (
+                        <option key={d} value={d}>
+                          {weekdayForDate(d)} — {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {myTeamsInEvent.map((t) => {
-                    const key = eventTeamKey(ev.id, t.id, today());
+                    const key = eventTeamKey(ev.id, t.id, selectedDate);
                     return (
-                      <li key={t.id} className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm text-stone-700 dark:text-stone-300">{t.name}</span>
+                      <div
+                        key={t.id}
+                        className="flex flex-col rounded-lg border border-stone-200 bg-stone-50/50 p-4 dark:border-stone-600 dark:bg-stone-800/50"
+                      >
+                        <p className="mb-3 font-medium text-stone-900 dark:text-white">{t.name}</p>
                         {marked[key] ? (
-                          <span className="text-sm text-green-600 dark:text-green-400">Marked present</span>
+                          <p className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                            <span className="inline-block h-2 w-2 rounded-full bg-green-500" aria-hidden />
+                            Marked present
+                          </p>
                         ) : (
                           <button
                             type="button"
-                            onClick={() => markSelfPresent(t.id, ev.id, today())}
+                            onClick={() => markSelfPresent(t.id, ev.id, selectedDate)}
                             disabled={!canMark || submitting[key]}
-                            className="min-h-[44px] rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                            className="mt-auto min-h-[44px] w-full rounded-lg bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                           >
                             {submitting[key] ? "Saving…" : "Mark present"}
                           </button>
                         )}
-                      </li>
+                      </div>
                     );
                   })}
-                </ul>
+                </div>
               </Card>
             );
           })
         ) : teams.length === 0 ? (
           <p className="text-sm text-stone-500">You are not in any team yet.</p>
         ) : (
-          teams.map((t) => (
-            <Card key={t.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium text-stone-900 dark:text-white">{t.name}</span>
-              {marked[t.id] ? (
-                <span className="text-sm text-green-600 dark:text-green-400">Marked present for today</span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => markSelfPresent(t.id)}
-                  disabled={!canMark || submitting[t.id]}
-                  className="min-h-[44px] rounded bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {submitting[t.id] ? "Saving…" : "Mark present today"}
-                </button>
-              )}
-            </Card>
-          ))
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {teams.map((t) => (
+              <div
+                key={t.id}
+                className="flex flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-600 dark:bg-stone-800"
+              >
+                <p className="mb-3 font-medium text-stone-900 dark:text-white">{t.name}</p>
+                {marked[t.id] ? (
+                  <p className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                    <span className="inline-block h-2 w-2 rounded-full bg-green-500" aria-hidden />
+                    Marked present for today
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => markSelfPresent(t.id)}
+                    disabled={!canMark || submitting[t.id]}
+                    className="mt-auto min-h-[44px] w-full rounded-lg bg-amber-600 px-4 py-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {submitting[t.id] ? "Saving…" : "Mark present today"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
       {!canMark && venueRequired === true && (

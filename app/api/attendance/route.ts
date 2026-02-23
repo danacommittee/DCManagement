@@ -10,8 +10,19 @@ export async function GET(req: NextRequest) {
     const email = decoded.email?.toLowerCase();
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    const myRole = membersSnap.docs[0].data().role;
     const myId = membersSnap.docs[0].id;
+    const rawRole = membersSnap.docs[0].data().role;
+    let myRole: "member" | "admin" | "super_admin";
+    if (typeof rawRole === "string") {
+      const normalized = rawRole.trim().toLowerCase().replace(/\s+/g, "_");
+      if (normalized === "admin" || normalized === "super_admin") {
+        myRole = normalized;
+      } else {
+        myRole = "member";
+      }
+    } else {
+      myRole = "member";
+    }
 
     const { searchParams } = new URL(req.url);
     const eventId = searchParams.get("eventId");
@@ -168,7 +179,18 @@ export async function POST(req: NextRequest) {
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const myId = membersSnap.docs[0].id;
-    const myRole = membersSnap.docs[0].data().role;
+    const rawRole = membersSnap.docs[0].data().role;
+    let myRole: "member" | "admin" | "super_admin";
+    if (typeof rawRole === "string") {
+      const normalized = rawRole.trim().toLowerCase().replace(/\s+/g, "_");
+      if (normalized === "admin" || normalized === "super_admin") {
+        myRole = normalized;
+      } else {
+        myRole = "member";
+      }
+    } else {
+      myRole = "member";
+    }
 
     const body = await req.json();
     const memberSelf = body.memberSelf === true;
@@ -193,14 +215,17 @@ export async function POST(req: NextRequest) {
     let memberIds = (teamData?.memberIds as string[]) || [];
 
     if (memberSelf) {
-      if (myRole !== "member") return NextResponse.json({ error: "memberSelf only for members" }, { status: 403 });
-      if (date !== today) return NextResponse.json({ error: "Members can only mark attendance for today" }, { status: 403 });
-      if (!memberIds.includes(myId)) return NextResponse.json({ error: "You are not in this team" }, { status: 403 });
+      if (myRole !== "member") return NextResponse.json({ error: "Only regular members can use self-check-in" }, { status: 403 });
+      // Members can self-check-in for today (ad-hoc) OR for past days within an event's date range.
+      if (!eventId && date !== today) {
+        return NextResponse.json({ error: "Members can only mark ad-hoc attendance for today" }, { status: 403 });
+      }
 
       const venueLat = process.env.ATTENDANCE_VENUE_LAT ? parseFloat(process.env.ATTENDANCE_VENUE_LAT) : null;
       const venueLng = process.env.ATTENDANCE_VENUE_LNG ? parseFloat(process.env.ATTENDANCE_VENUE_LNG) : null;
       const venueRadius = process.env.ATTENDANCE_VENUE_RADIUS_METERS ? parseInt(process.env.ATTENDANCE_VENUE_RADIUS_METERS, 10) : null;
-      if (venueLat != null && venueLng != null && venueRadius != null) {
+      // Venue/location check is enforced only for same-day attendance.
+      if (date === today && venueLat != null && venueLng != null && venueRadius != null) {
         if (lat == null || lng == null) {
           return NextResponse.json({ error: "Location required. Please enable location access." }, { status: 400 });
         }
@@ -227,7 +252,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const existingQuery = db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date);
+      if (!memberIds.includes(myId)) {
+        return NextResponse.json(
+          { error: eventId ? "You are not in this team for this event" : "You are not in this team" },
+          { status: 403 }
+        );
+      }
+
+      let existingQuery = db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date);
+      // Keep event and ad-hoc attendance separate
+      existingQuery = eventId ? existingQuery.where("eventId", "==", eventId) : existingQuery.where("eventId", "==", null);
       const existing = await existingQuery.limit(1).get();
       const now = Date.now();
       let newPresent: string[];
@@ -284,7 +318,9 @@ export async function POST(req: NextRequest) {
       if (date < fromStr || date > toStr) return NextResponse.json({ error: "Date not in event range" }, { status: 403 });
     }
 
-    const existing = await db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date).limit(1).get();
+    let existingQuery = db.collection("attendance").where("teamId", "==", teamId).where("date", "==", date);
+    existingQuery = eventId ? existingQuery.where("eventId", "==", eventId) : existingQuery.where("eventId", "==", null);
+    const existing = await existingQuery.limit(1).get();
     const now = Date.now();
     const docData: Record<string, unknown> = {
       ...(eventId ? { eventId } : {}),

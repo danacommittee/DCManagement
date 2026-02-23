@@ -10,8 +10,13 @@ export async function GET(req: NextRequest) {
     const email = decoded.email?.toLowerCase();
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    const myRole = membersSnap.docs[0].data().role;
     const myId = membersSnap.docs[0].id;
+    const rawRole = membersSnap.docs[0].data().role;
+    let myRole: "member" | "admin" | "super_admin" = "member";
+    if (typeof rawRole === "string") {
+      const n = rawRole.trim().toLowerCase().replace(/\s+/g, "_");
+      if (n === "admin" || n === "super_admin") myRole = n;
+    }
 
     const snap = await db.collection("teams").orderBy("name").get();
     let teams = snap.docs.map((d) => {
@@ -31,7 +36,30 @@ export async function GET(req: NextRequest) {
     if (myRole === "admin") {
       teams = teams.filter((t) => t.leaderId === myId || t.leader2Id === myId);
     } else if (myRole === "member") {
-      teams = teams.filter((t) => t.memberIds.includes(myId));
+      // For members, include base teams where they are in memberIds,
+      // plus any teams where an active event's teamOverrides list includes them.
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const eventsSnap = await db.collection("events").get();
+      const extraTeamIds = new Set<string>();
+      eventsSnap.docs.forEach((d) => {
+        const x = d.data() as {
+          dateFrom?: string;
+          dateTo?: string;
+          teamOverrides?: Record<string, { memberIds?: string[] }>;
+        };
+        const from = (x.dateFrom ?? "").slice(0, 10);
+        const to = (x.dateTo ?? "").slice(0, 10);
+        if (!from || !to) return;
+        if (todayStr < from || todayStr > to) return;
+        const overrides = x.teamOverrides;
+        if (!overrides || typeof overrides !== "object") return;
+        for (const [teamId, ov] of Object.entries(overrides)) {
+          if (Array.isArray(ov.memberIds) && ov.memberIds.includes(myId)) {
+            extraTeamIds.add(teamId);
+          }
+        }
+      });
+      teams = teams.filter((t) => t.memberIds.includes(myId) || extraTeamIds.has(t.id));
     }
     return NextResponse.json({ teams });
   } catch (e) {

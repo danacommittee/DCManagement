@@ -5,7 +5,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { getAuthHeaders } from "@/lib/api";
 import { Card, CardHeader } from "@/components/Card";
-import { PushSubscribe } from "@/components/PushSubscribe";
 
 export default function SettingsPage() {
   const { profile, refetchProfile } = useAuth();
@@ -25,6 +24,80 @@ export default function SettingsPage() {
   }, [profile]);
 
   if (!profile) return null;
+
+  const ensurePushSubscription = async (): Promise<boolean> => {
+    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
+      toast("Notifications are not supported in this browser", "error");
+      return false;
+    }
+    try {
+      let permission = Notification.permission;
+      if (permission !== "granted") {
+        permission = await Notification.requestPermission();
+      }
+      if (permission !== "granted") {
+        toast("Notifications are blocked. Enable them in your browser settings.", "error");
+        return false;
+      }
+
+      let registration = await navigator.serviceWorker.getRegistration("/");
+      if (!registration) {
+        registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      }
+      await navigator.serviceWorker.ready;
+
+      const res = await fetch("/api/push/vapid-public");
+      if (!res.ok) {
+        toast("Notifications are not configured", "error");
+        return false;
+      }
+      const { publicKey } = (await res.json()) as { publicKey?: string };
+      if (!publicKey) {
+        toast("Notifications are not configured", "error");
+        return false;
+      }
+
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      const sub = subscription.toJSON();
+      const headers = await getAuthHeaders();
+      const postRes = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          endpoint: sub.endpoint,
+          keys: sub.keys,
+        }),
+      });
+      if (!postRes.ok) {
+        const err = await postRes.json().catch(() => ({}));
+        const msg = (err as { error?: string }).error || "Failed to save push subscription";
+        toast(msg, "error");
+        return false;
+      }
+      toast("Push notifications enabled on this device");
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to enable push notifications";
+      toast(msg, "error");
+      return false;
+    }
+  };
+
+  const handleTogglePush = async () => {
+    const next = !notifyPush;
+    if (next) {
+      const ok = await ensurePushSubscription();
+      if (!ok) {
+        setNotifyPush(false);
+        return;
+      }
+    }
+    setNotifyPush(next);
+  };
 
   const saveProfile = async () => {
     setSavingProfile(true);
@@ -155,7 +228,7 @@ export default function SettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setNotifyPush((v) => !v)}
+                    onClick={handleTogglePush}
                     className={`flex h-6 w-11 items-center rounded-full px-1 transition ${
                       notifyPush ? "bg-amber-500" : "bg-stone-300 dark:bg-stone-600"
                     }`}
@@ -177,17 +250,22 @@ export default function SettingsPage() {
             >
               {savingNotifications ? "Saving…" : "Save notification settings"}
             </button>
-            <div className="mt-4 border-t border-stone-200 pt-3 text-sm text-stone-600 dark:border-stone-700 dark:text-stone-400">
-              <p className="mb-1 font-medium text-stone-800 dark:text-stone-200">Browser notifications</p>
-              <p className="mb-2 text-xs text-stone-500 dark:text-stone-400">
-                Enable notifications in this browser so we can deliver push alerts here.
-              </p>
-              <PushSubscribe />
-            </div>
           </div>
         </Card>
       </div>
     </div>
   );
+}
+
+function urlBase64ToUint8Array(base64String: string): BufferSource {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }
 

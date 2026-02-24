@@ -175,11 +175,13 @@ export async function GET(req: NextRequest) {
         if (!payload) continue;
         const subs = subscriptionsByUser.get(userId) ?? [];
         for (const sub of subs) {
-          const ok = await sendPushNotification(
+          const res = await sendPushNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
             payload
           );
-          if (ok) pushSent++;
+          if (res.ok) {
+            pushSent++;
+          }
         }
       }
     }

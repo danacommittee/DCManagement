@@ -97,12 +97,19 @@ export async function getSubscriptionsByUserIds(
   return result;
 }
 
+export interface PushSendResult {
+  ok: boolean;
+  error?: string;
+}
+
 /** Send a push notification to a subscription */
 export async function sendPushNotification(
   subscription: Pick<PushSubscriptionDoc, "endpoint" | "keys">,
   payload: { title: string; body?: string; url?: string }
-): Promise<boolean> {
-  if (!vapidPrivateKey) return false;
+): Promise<PushSendResult> {
+  if (!vapidPrivateKey) {
+    return { ok: false, error: "VAPID keys not configured" };
+  }
   try {
     await webpush.sendNotification(
       {
@@ -112,9 +119,25 @@ export async function sendPushNotification(
       JSON.stringify(payload),
       { TTL: 86400 }
     );
-    return true;
+    return { ok: true };
   } catch (e) {
     console.error("[Push] send failed:", e);
-    return false;
+    let message = "Unknown push error";
+    if (e instanceof Error && e.message) {
+      message = e.message;
+    } else if (typeof e === "object" && e && "statusCode" in e) {
+      const anyErr = e as { statusCode?: number; body?: unknown };
+      let body = "";
+      if (typeof anyErr.body === "string") body = anyErr.body;
+      else if (anyErr.body && typeof anyErr.body === "object") {
+        try {
+          body = JSON.stringify(anyErr.body);
+        } catch {
+          body = String(anyErr.body);
+        }
+      } else if (anyErr.body != null) body = String(anyErr.body);
+      message = `HTTP ${anyErr.statusCode ?? ""} ${body}`.trim();
+    }
+    return { ok: false, error: message };
   }
 }

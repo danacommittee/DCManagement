@@ -25,10 +25,10 @@ export default function SettingsPage() {
 
   if (!profile) return null;
 
-  const ensurePushSubscription = async (): Promise<boolean> => {
+  const ensurePushSubscription = async (): Promise<void> => {
     if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
       toast("Notifications are not supported in this browser", "error");
-      return false;
+      return;
     }
     try {
       let permission = Notification.permission;
@@ -36,8 +36,8 @@ export default function SettingsPage() {
         permission = await Notification.requestPermission();
       }
       if (permission !== "granted") {
-        toast("Notifications are blocked. Enable them in your browser settings.", "error");
-        return false;
+        toast("This browser has notifications blocked for this site. You can still receive alerts on other devices.", "error");
+        return;
       }
 
       let registration = await navigator.serviceWorker.getRegistration("/");
@@ -49,12 +49,12 @@ export default function SettingsPage() {
       const res = await fetch("/api/push/vapid-public");
       if (!res.ok) {
         toast("Notifications are not configured", "error");
-        return false;
+        return;
       }
       const { publicKey } = (await res.json()) as { publicKey?: string };
       if (!publicKey) {
         toast("Notifications are not configured", "error");
-        return false;
+        return;
       }
 
       const subscription = await registration.pushManager.subscribe({
@@ -76,27 +76,23 @@ export default function SettingsPage() {
         const err = await postRes.json().catch(() => ({}));
         const msg = (err as { error?: string }).error || "Failed to save push subscription";
         toast(msg, "error");
-        return false;
+        return;
       }
       toast("Push notifications enabled on this device");
-      return true;
+      return;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to enable push notifications";
       toast(msg, "error");
-      return false;
+      return;
     }
   };
 
-  const handleTogglePush = async () => {
+  const handleTogglePush = () => {
     const next = !notifyPush;
-    if (next) {
-      const ok = await ensurePushSubscription();
-      if (!ok) {
-        setNotifyPush(false);
-        return;
-      }
-    }
     setNotifyPush(next);
+    if (next) {
+      void ensurePushSubscription();
+    }
   };
 
   const saveProfile = async () => {
@@ -197,14 +193,10 @@ export default function SettingsPage() {
           <CardHeader>Notifications</CardHeader>
           <div className="space-y-4">
             <div>
-              <p className="mb-2 text-sm text-stone-600 dark:text-stone-400">
-                Choose how you'd like to receive attendance and wrap-up reminders.
-              </p>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-stone-800 dark:text-stone-200">Email</p>
-                    <p className="text-xs text-stone-500 dark:text-stone-400">Always on for your account.</p>
                   </div>
                   <div className="flex h-6 w-11 items-center rounded-full bg-amber-500 opacity-60">
                     <div className="ml-auto mr-1 h-4 w-4 rounded-full bg-white" />
@@ -213,7 +205,6 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-stone-800 dark:text-stone-200">SMS</p>
-                    <p className="text-xs text-stone-500 dark:text-stone-400">Always on for your account.</p>
                   </div>
                   <div className="flex h-6 w-11 items-center rounded-full bg-amber-500 opacity-60">
                     <div className="ml-auto mr-1 h-4 w-4 rounded-full bg-white" />
@@ -222,9 +213,6 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-stone-800 dark:text-stone-200">Push notifications</p>
-                    <p className="text-xs text-stone-500 dark:text-stone-400">
-                      When enabled, you'll get reminders on any device where browser notifications are allowed.
-                    </p>
                   </div>
                   <button
                     type="button"

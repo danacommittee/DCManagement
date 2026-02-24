@@ -281,9 +281,12 @@ export default function MessagesPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errorMsg = data.error || data.message || "Failed to send message";
+        const errorParts = [data.error, data.message]
+          .filter(Boolean)
+          .filter((v, i, arr) => arr.indexOf(v) === i);
+        const errorMsg = errorParts.length > 0 ? errorParts.join(" — ") : "Failed to send message";
         setError(errorMsg);
-        toast(errorMsg, "error");
+        toast(errorMsg.length > 80 ? `${errorMsg.slice(0, 80)}…` : errorMsg, "error");
         return;
       }
       if (data.ok) {
@@ -760,7 +763,7 @@ export default function MessagesPage() {
               <p className={`font-medium ${success.failed > 0 ? "text-amber-800 dark:text-amber-200" : "text-green-800 dark:text-green-200"}`}>
                 {success.failed > 0 ? "⚠ Partial success" : "✓ Message sent successfully!"}
               </p>
-              <p className={`mt-1 ${success.failed > 0 ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
+              <p className={`mt-1 whitespace-pre-wrap break-words ${success.failed > 0 ? "text-amber-700 dark:text-amber-300" : "text-green-700 dark:text-green-300"}`}>
                 {success.message}
               </p>
               <div className={`mt-2 space-y-1 text-xs ${success.failed > 0 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
@@ -777,7 +780,7 @@ export default function MessagesPage() {
           {error && (
             <div className="rounded-lg bg-red-50 p-3 text-sm dark:bg-red-900/20">
               <p className="font-medium text-red-800 dark:text-red-200">✗ Failed to send message</p>
-              <p className="mt-1 text-red-700 dark:text-red-300">{error}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-red-700 dark:text-red-300">{error}</p>
             </div>
           )}
         </div>

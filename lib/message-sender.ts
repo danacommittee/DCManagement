@@ -353,6 +353,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
     let failed = 0;
 
     if (channel === "email" && isEmailConfigured()) {
+      let lastError: string | null = null;
       // Prepare attachments once for all recipients (if any)
       let emailAttachments: EmailAttachment[] = [];
       let inlineImageMap: Record<string, string> = {};
@@ -368,11 +369,24 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
 
       for (const memberId of recipientIds) {
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
-        if (!member || !member.email) { failed++; continue; }
-        
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, inlineImageMap, teamsListFormatted);
+        if (!member || !member.email) {
+          failed++;
+          continue;
+        }
+
+        const text = resolveBody(
+          templateBody,
+          member.name,
+          teamName,
+          senderName,
+          eventName,
+          teamMembersList,
+          teamLeadersList,
+          inlineImageMap,
+          teamsListFormatted
+        );
         const html = text.replace(/\n/g, "<br>");
-        
+
         const result = await sendEmail({
           to: member.email,
           subject: emailSubject,
@@ -380,20 +394,50 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           html,
           attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
         });
-        if (result.ok) sent++; else { console.error("Email send failed for", memberId, result.error); failed++; }
+        if (result.ok) {
+          sent++;
+        } else {
+          console.error("Email send failed for", memberId, result.error);
+          if (result.error && !lastError) lastError = String(result.error);
+          failed++;
+        }
       }
       totalSent += sent;
       totalFailed += failed;
-      const attachmentNote = emailAttachments.length > 0 ? ` (${emailAttachments.length} attachment${emailAttachments.length === 1 ? "" : "s"})` : "";
-      summaryParts.push("Email: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : "") + attachmentNote);
+      const attachmentNote =
+        emailAttachments.length > 0
+          ? ` (${emailAttachments.length} attachment${emailAttachments.length === 1 ? "" : "s"})`
+          : "";
+      summaryParts.push(
+        "Email: " +
+          sent +
+          " sent" +
+          (failed > 0 ? ", " + failed + " failed" : "") +
+          attachmentNote +
+          (lastError ? " (e.g. " + lastError + ")" : "")
+      );
     } else if (channel === "sms" && (isSmsGateConfigured() || (sid && authToken && fromNumber))) {
       let lastError: string | null = null;
       for (const memberId of recipientIds) {
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
-        if (!member || !e164) { lastError = member ? "Phone invalid." : "Member not found."; failed++; continue; }
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, undefined, teamsListFormatted);
-        
+        if (!member || !e164) {
+          lastError = member ? "Phone invalid (missing or incorrect format)." : "Member not found.";
+          failed++;
+          continue;
+        }
+        const text = resolveBody(
+          templateBody,
+          member.name,
+          teamName,
+          senderName,
+          eventName,
+          teamMembersList,
+          teamLeadersList,
+          undefined,
+          teamsListFormatted
+        );
+
         if (isSmsGateConfigured()) {
           const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
           if (result.ok) {
@@ -403,6 +447,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
             }
           } else {
             console.error("SMS Gate send failed for", memberId, result.error);
+            if (result.error) lastError = String(result.error);
             failed++;
           }
         } else if (sid && authToken && fromNumber) {
@@ -412,37 +457,77 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
             sent++;
           } catch (err) {
             console.error("Twilio SMS send failed for", memberId, err);
+            if (!lastError) lastError = err instanceof Error ? err.message : String(err);
             failed++;
           }
         }
       }
       totalSent += sent;
       totalFailed += failed;
-      summaryParts.push("SMS: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : "") + (lastError ? " (" + lastError + ")" : ""));
+      summaryParts.push(
+        "SMS: " +
+          sent +
+          " sent" +
+          (failed > 0 ? ", " + failed + " failed" : "") +
+          (lastError ? " (e.g. " + lastError + ")" : "")
+      );
     } else if (channel === "whatsapp" && sid && authToken && fromNumber) {
+      let lastError: string | null = null;
       for (const memberId of recipientIds) {
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
-        if (!member || !e164) { failed++; continue; }
-        const text = resolveBody(templateBody, member.name, teamName, senderName, eventName, teamMembersList, teamLeadersList, undefined, teamsListFormatted);
+        if (!member || !e164) {
+          failed++;
+          continue;
+        }
+        const text = resolveBody(
+          templateBody,
+          member.name,
+          teamName,
+          senderName,
+          eventName,
+          teamMembersList,
+          teamLeadersList,
+          undefined,
+          teamsListFormatted
+        );
         const client = twilio(sid, authToken);
         try {
           await client.messages.create({ body: text, from: `whatsapp:${fromNumber}`, to: `whatsapp:${e164}` });
           sent++;
         } catch (err) {
           console.error("Twilio WhatsApp send failed for", memberId, err);
+          if (!lastError) lastError = err instanceof Error ? err.message : String(err);
           failed++;
         }
       }
       totalSent += sent;
       totalFailed += failed;
-      summaryParts.push("WhatsApp: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
+      summaryParts.push(
+        "WhatsApp: " +
+          sent +
+          " sent" +
+          (failed > 0 ? ", " + failed + " failed" : "") +
+          (lastError ? " (e.g. " + lastError + ")" : "")
+      );
     } else if (channel === "push" && pushEnabled) {
+      let lastError: string | null = null;
       for (const memberId of recipientIds) {
         const subs = pushSubscriptionsByUser.get(memberId) ?? [];
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const meta = membersMap[memberId];
-        if (!member || subs.length === 0 || (meta && meta.notifyPush === false)) {
+        if (!member) {
+          if (!lastError) lastError = "Member not found.";
+          failed++;
+          continue;
+        }
+        if (meta && meta.notifyPush === false) {
+          if (!lastError) lastError = "Push is disabled in settings for this user.";
+          failed++;
+          continue;
+        }
+        if (subs.length === 0) {
+          if (!lastError) lastError = "No push subscription found for this user (device not enabled).";
           failed++;
           continue;
         }
@@ -459,13 +544,15 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         );
         let userSent = false;
         for (const sub of subs) {
-          const ok = await sendPushNotification(
+          const res = await sendPushNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
             { title: templateName, body: text, url: "/dashboard" }
           );
-          if (ok) {
+          if (res.ok) {
             sent++;
             userSent = true;
+          } else if (res.error && !lastError) {
+            lastError = res.error;
           }
         }
         if (!userSent) {
@@ -474,17 +561,25 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       }
       totalSent += sent;
       totalFailed += failed;
-      summaryParts.push("Push: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
+      summaryParts.push(
+        "Push: " +
+          sent +
+          " sent" +
+          (failed > 0 ? ", " + failed + " failed" : "") +
+          (lastError ? " (e.g. " + lastError + ")" : "")
+      );
     }
   }
 
   const message = summaryParts.length > 0 ? summaryParts.join("; ") : "No messages sent";
+  const allFailed = totalSent === 0 && totalFailed > 0;
   return {
-    ok: true,
+    ok: !allFailed,
     sent: totalSent,
     failed: totalFailed,
     recipientCount: recipientIds.length,
     recipientIds, // Return recipient IDs for logging
     message,
+    error: allFailed ? message : undefined,
   };
 }

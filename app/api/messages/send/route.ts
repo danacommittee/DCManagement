@@ -72,7 +72,16 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.error || "Failed to send messages" }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: result.error || "Failed to send messages",
+          message: result.message,
+          sent: result.sent,
+          failed: result.failed,
+          recipientCount: result.recipientCount,
+        },
+        { status: 400 }
+      );
     }
 
     // Record the message in Firestore

@@ -182,6 +182,21 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
+      {profile?.notifyPush !== true && (
+        <div className="mb-6 rounded-xl border border-dashed border-amber-200 bg-amber-50 p-4 dark:border-amber-700/60 dark:bg-amber-900/20">
+          <h2 className="mb-1 text-sm font-medium text-amber-900 dark:text-amber-200">Enable push notifications</h2>
+          <p className="mb-2 text-sm text-amber-800 dark:text-amber-100">
+            Turn on push notifications to get attendance and wrap-up reminders on this account.
+          </p>
+          <Link
+            href="/dashboard/settings"
+            className="inline-flex min-h-[36px] items-center rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+          >
+            Open notification settings
+          </Link>
+        </div>
+      )}
+
       {upcomingEvents.length > 0 && (
         <div className="mb-8">
           <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Upcoming events</h2>

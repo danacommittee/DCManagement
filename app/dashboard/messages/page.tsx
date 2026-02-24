@@ -108,6 +108,64 @@ export default function MessagesPage() {
     }
   }, [templates]);
 
+  const scheduledSummaries = useMemo(() => {
+    type Summary = {
+      key: string;
+      isRecurring: boolean;
+      items: ScheduledMessage[];
+      representative: ScheduledMessage;
+      nextPending?: ScheduledMessage;
+      lastRun?: ScheduledMessage;
+    };
+    if (!scheduledMessages || scheduledMessages.length === 0) return [] as Summary[];
+
+    const byKey = new Map<string, Summary>();
+    const sorted = [...scheduledMessages].sort((a, b) => a.scheduledAt - b.scheduledAt);
+
+    for (const msg of sorted) {
+      const isRecurring = msg.recurrence === "daily" || msg.recurrence === "weekly";
+      const groupKey = isRecurring
+        ? [
+            "rec",
+            msg.templateId,
+            msg.audienceType,
+            msg.eventId ?? "",
+            msg.audienceId ?? "",
+            Array.isArray(msg.audienceIds) ? msg.audienceIds.join(",") : "",
+            msg.recurrence ?? "",
+            msg.recurrenceTime ?? "",
+            msg.recurrenceDayOfWeek ?? "",
+            msg.createdBy ?? "",
+          ].join("|")
+        : `one:${msg.id}`;
+
+      let summary = byKey.get(groupKey);
+      if (!summary) {
+        summary = {
+          key: groupKey,
+          isRecurring,
+          items: [],
+          representative: msg,
+        };
+        byKey.set(groupKey, summary);
+      }
+      summary.items.push(msg);
+    }
+
+    for (const summary of byKey.values()) {
+      const items = [...summary.items].sort((a, b) => a.scheduledAt - b.scheduledAt);
+      const nextPending = items.find((m) => m.status === "pending");
+      const lastRun = items[items.length - 1];
+      summary.nextPending = nextPending;
+      summary.lastRun = lastRun;
+      summary.representative = nextPending ?? lastRun;
+    }
+
+    return Array.from(byKey.values()).sort(
+      (a, b) => a.representative.scheduledAt - b.representative.scheduledAt
+    );
+  }, [scheduledMessages]);
+
   const fetchScheduledMessages = async () => {
     setScheduledMessagesLoading(true);
     try {
@@ -823,9 +881,9 @@ export default function MessagesPage() {
               className="flex items-center gap-2 text-left"
             >
               <h2 className="text-xl font-semibold text-stone-900 dark:text-white">Scheduled Messages</h2>
-              {scheduledMessages.length > 0 && (
+              {scheduledSummaries.length > 0 && (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                  {scheduledMessages.length}
+                {scheduledSummaries.length}
                 </span>
               )}
               <svg
@@ -855,11 +913,16 @@ export default function MessagesPage() {
             <div className="mt-4">
               {scheduledMessagesLoading ? (
                 <p className="text-stone-500">Loading scheduled messages...</p>
-              ) : scheduledMessages.length === 0 ? (
+              ) : scheduledSummaries.length === 0 ? (
                 <p className="text-stone-500">No scheduled messages</p>
               ) : (
                 <div className="space-y-3">
-                  {scheduledMessages.map((msg) => {
+                  {scheduledSummaries.map((group) => {
+                const msg = group.representative;
+                const items = [...group.items].sort((a, b) => a.scheduledAt - b.scheduledAt);
+                const runCount = items.length;
+                const nextPending = group.nextPending;
+                const lastRun = group.lastRun;
                 const template = templates.find((t) => t.id === msg.templateId);
                 const scheduledDate = new Date(msg.scheduledAt);
                 const isPast = scheduledDate.getTime() <= Date.now();
@@ -898,16 +961,30 @@ export default function MessagesPage() {
                             <span className="font-medium">Channels:</span> {msg.channels.map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ")}
                           </p>
                           <p>
-                            <span className="font-medium">Audience:</span> {msg.audienceType === "entire_team" ? "Entire Team" : msg.audienceType === "sub_team" ? "Sub-team" : "Individual"}
+                            <span className="font-medium">Audience:</span>{" "}
+                            {msg.audienceType === "entire_team"
+                              ? "Entire Team"
+                              : msg.audienceType === "sub_team"
+                              ? "Sub-team"
+                              : "Individual"}
                           </p>
                           {(msg.recurrence === "daily" || msg.recurrence === "weekly") && (
-                            <p>
-                              <span className="font-medium">Recurring:</span>{" "}
-                              {msg.recurrence === "daily"
-                                ? `Every day at ${msg.recurrenceTime ?? "—"}`
-                                : `Every ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][msg.recurrenceDayOfWeek ?? 0]} at ${msg.recurrenceTime ?? "—"}`}
-                              {msg.recurrenceEndDate ? ` until ${msg.recurrenceEndDate}` : ""}
-                            </p>
+                            <>
+                              <p>
+                                <span className="font-medium">Recurring:</span>{" "}
+                                {msg.recurrence === "daily"
+                                  ? `Every day at ${msg.recurrenceTime ?? "—"}`
+                                  : `Every ${
+                                      ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][msg.recurrenceDayOfWeek ?? 0]
+                                    } at ${msg.recurrenceTime ?? "—"}`}
+                                {msg.recurrenceEndDate ? ` until ${msg.recurrenceEndDate}` : ""}
+                              </p>
+                              <p>
+                                <span className="font-medium">Runs:</span> {runCount}
+                                {nextPending && ` · Next: ${new Date(nextPending.scheduledAt).toLocaleString()}`}
+                                {lastRun && lastRun.sentAt && ` · Last sent: ${new Date(lastRun.sentAt).toLocaleString()}`}
+                              </p>
+                            </>
                           )}
                           {msg.error && (
                             <p className="text-red-600 dark:text-red-400">

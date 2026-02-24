@@ -12,7 +12,7 @@ export default function SettingsPage() {
 
   const [name, setName] = useState(profile?.name ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
-  const [notifyPush, setNotifyPush] = useState(profile?.notifyPush !== false);
+  const [notifyPush, setNotifyPush] = useState(profile?.notifyPush === true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
 
@@ -20,7 +20,7 @@ export default function SettingsPage() {
     if (!profile) return;
     setName(profile.name ?? "");
     setPhone(profile.phone ?? "");
-    setNotifyPush(profile.notifyPush !== false);
+    setNotifyPush(profile.notifyPush === true);
   }, [profile]);
 
   if (!profile) return null;
@@ -210,22 +210,21 @@ export default function SettingsPage() {
                     <div className="ml-auto mr-1 h-4 w-4 rounded-full bg-white" />
                   </div>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between" onClick={handleTogglePush}>
                   <div>
                     <p className="text-sm font-medium text-stone-800 dark:text-stone-200">Push notifications</p>
                   </div>
                   <button
                     type="button"
-                    onClick={handleTogglePush}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTogglePush();
+                    }}
                     className={`flex h-6 w-11 items-center rounded-full px-1 transition ${
-                      notifyPush ? "bg-amber-500" : "bg-stone-300 dark:bg-stone-600"
+                      notifyPush ? "bg-amber-500 justify-end" : "bg-stone-300 dark:bg-stone-600 justify-start"
                     }`}
                   >
-                    <div
-                      className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                        notifyPush ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
+                    <div className="h-4 w-4 rounded-full bg-white shadow transition" />
                   </button>
                 </div>
               </div>

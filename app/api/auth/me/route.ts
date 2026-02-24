@@ -85,7 +85,8 @@ export async function GET(req: NextRequest) {
       teamIds: Array.isArray(data.teamIds) ? data.teamIds : [],
       notifyEmail: data.notifyEmail != null ? !!data.notifyEmail : true,
       notifySms: data.notifySms != null ? !!data.notifySms : true,
-      notifyPush: data.notifyPush != null ? !!data.notifyPush : true,
+      // Push is opt-in: default to false unless explicitly true
+      notifyPush: data.notifyPush === true,
     };
     return NextResponse.json({ member });
   } catch (e) {

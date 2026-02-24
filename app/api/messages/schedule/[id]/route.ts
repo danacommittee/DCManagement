@@ -75,8 +75,8 @@ export async function PATCH(
 
     // channels
     if (Array.isArray(body.channels)) {
-      const channels = body.channels.filter((c: string): c is "email" | "sms" | "whatsapp" =>
-        ["email", "sms", "whatsapp"].includes(c)
+      const channels = body.channels.filter((c: string): c is "email" | "sms" | "whatsapp" | "push" =>
+        ["email", "sms", "whatsapp", "push"].includes(c)
       );
       if (channels.length === 0) {
         return NextResponse.json({ error: "At least one channel required" }, { status: 400 });

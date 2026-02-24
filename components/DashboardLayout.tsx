@@ -17,6 +17,7 @@ const navByRole: Record<Role, { label: string; href: string }[]> = {
     { label: "Send Message", href: "/dashboard/messages" },
     { label: "Attendance", href: "/dashboard/attendance" },
     { label: "Reports", href: "/dashboard/reports" },
+    { label: "Settings", href: "/dashboard/settings" },
   ],
   admin: [
     { label: "Dashboard", href: "/dashboard" },
@@ -26,10 +27,12 @@ const navByRole: Record<Role, { label: string; href: string }[]> = {
     { label: "Send Message", href: "/dashboard/messages" },
     { label: "Attendance", href: "/dashboard/attendance" },
     { label: "Reports", href: "/dashboard/reports" },
+    { label: "Settings", href: "/dashboard/settings" },
   ],
   member: [
     { label: "Events", href: "/dashboard/events" },
     { label: "Attendance", href: "/dashboard/attendance" },
+    { label: "Settings", href: "/dashboard/settings" },
   ],
 };
 

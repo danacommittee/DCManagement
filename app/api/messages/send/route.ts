@@ -26,13 +26,15 @@ export async function POST(req: NextRequest) {
     const bodyOverride = typeof body.bodyOverride === "string" ? body.bodyOverride : undefined;
     const subjectOverride = typeof body.subjectOverride === "string" ? body.subjectOverride : undefined;
     const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
-    const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
+    const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" | "push" =>
+      ["email", "sms", "whatsapp", "push"].includes(c)
+    );
 
     if (!templateId || !["individual", "sub_team", "entire_team"].includes(audienceType)) {
       return NextResponse.json({ error: "Invalid templateId or audienceType" }, { status: 400 });
     }
     if (channels.length === 0) {
-      return NextResponse.json({ error: "Select at least one channel (email, sms, or whatsapp)" }, { status: 400 });
+      return NextResponse.json({ error: "Select at least one channel (email, sms, push, or whatsapp)" }, { status: 400 });
     }
 
     // Compute sender display name for {{YourName}} placeholder

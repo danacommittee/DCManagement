@@ -13,14 +13,22 @@ export async function PATCH(
     const email = decoded.email?.toLowerCase();
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    if (membersSnap.docs[0].data().role !== "super_admin") {
-      return NextResponse.json({ error: "Only Super Admin can update roles" }, { status: 403 });
-    }
-
     const { id } = await params;
+    const myId = membersSnap.docs[0].id;
+    const myRole = membersSnap.docs[0].data().role as string | undefined;
+    const isSuperAdmin =
+      typeof myRole === "string" &&
+      myRole.trim().toLowerCase().replace(/\s+/g, "_") === "super_admin";
+    const isSelf = id === myId;
+
+    // Only Super Admin can edit other users; everyone can edit their own safe fields
+    if (!isSelf && !isSuperAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const body = await req.json();
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
-    if (typeof body.role === "string" && ["member", "admin", "super_admin"].includes(body.role)) {
+    // Only Super Admin can change roles/teamIds; members/admins can edit their own profile fields + notification prefs
+    if (isSuperAdmin && typeof body.role === "string" && ["member", "admin", "super_admin"].includes(body.role)) {
       updates.role = body.role;
     }
     if (typeof body.title === "string") updates.title = body.title;
@@ -29,7 +37,10 @@ export async function PATCH(
     if (typeof body.itsNumber === "string") updates.itsNumber = body.itsNumber;
     if (typeof body.phone === "string") updates.phone = body.phone;
     if (typeof body.name === "string") updates.name = body.name;
-    if (Array.isArray(body.teamIds)) updates.teamIds = body.teamIds;
+    if (isSuperAdmin && Array.isArray(body.teamIds)) updates.teamIds = body.teamIds;
+    if (typeof body.notifyPush === "boolean") updates.notifyPush = body.notifyPush;
+    if (typeof body.notifyEmail === "boolean") updates.notifyEmail = body.notifyEmail;
+    if (typeof body.notifySms === "boolean") updates.notifySms = body.notifySms;
 
     if (updates.title !== undefined || updates.firstName !== undefined || updates.lastName !== undefined) {
       const snap = await db.collection("members").doc(id).get();

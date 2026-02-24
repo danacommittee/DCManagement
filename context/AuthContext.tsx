@@ -21,6 +21,9 @@ interface MemberProfile {
   phone: string;
   role: Role;
   teamIds: string[];
+  notifyEmail?: boolean;
+  notifySms?: boolean;
+  notifyPush?: boolean;
 }
 
 interface AuthState {
@@ -118,8 +121,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      await setAuthPersistence();
       const provider = new GoogleAuthProvider();
+      // Important: don't await before signInWithPopup, to keep the browser's
+      // \"user gesture\" chain and avoid popup blocking on the first try.
+      void setAuthPersistence().catch((e) => {
+        console.warn("[Firebase] setAuthPersistence failed:", e);
+      });
       await signInWithPopup(auth, provider);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Sign-in failed";
@@ -127,6 +134,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (code === "auth/web-storage-unsupported") {
         setError(
           "Your browser is blocking login (storage is disabled). Please open this link in your device's main browser (Safari/Chrome) instead of an in-app browser."
+        );
+      } else if (code === "auth/popup-blocked") {
+        setError(
+          "Your browser blocked the sign-in popup. Please allow popups for this site or try again. On iOS, open the link in Safari/Chrome instead of an in-app browser."
         );
       } else {
         setError(message);

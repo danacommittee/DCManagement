@@ -26,7 +26,9 @@ export async function POST(req: NextRequest) {
     const bodyOverride = typeof body.bodyOverride === "string" ? body.bodyOverride : undefined;
     const subjectOverride = typeof body.subjectOverride === "string" ? body.subjectOverride : undefined;
     const rawChannels = Array.isArray(body.channels) ? body.channels : (typeof body.channel === "string" ? [body.channel] : []);
-    const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" => ["email", "sms", "whatsapp"].includes(c));
+    const channels = rawChannels.filter((c: string): c is "email" | "sms" | "whatsapp" | "push" =>
+      ["email", "sms", "whatsapp", "push"].includes(c)
+    );
     const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
     const recurrence = body.recurrence === "daily" || body.recurrence === "weekly" ? body.recurrence : null;
     const recurrenceTime = typeof body.recurrenceTime === "string" ? body.recurrenceTime.trim() : undefined;

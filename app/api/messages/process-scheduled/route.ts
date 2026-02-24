@@ -246,13 +246,37 @@ export async function GET(req: NextRequest) {
             }
           }
         } else {
+          // Total failure (no messages sent). We still want the recurring schedule
+          // to continue on future days, so we mark this run as failed but still
+          // create the next occurrence (if within recurrenceEndDate).
           await db.collection("scheduledMessages").doc(msg.id).update({
             status: "failed",
             error: sendResult.error || "Unknown error",
-            sentAt: Date.now(),
+            sentAt: now,
           });
           failed++;
           console.error(`[Process Scheduled] Failed to send message ${msg.id}:`, sendResult.error);
+
+          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "daily",
+              recurrenceTime: msg.recurrenceTime,
+              afterTimestamp: now,
+            });
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+            }
+          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+            const nextAt = getNextScheduledAt({
+              recurrence: "weekly",
+              recurrenceTime: msg.recurrenceTime,
+              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
+              afterTimestamp: now,
+            });
+            if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
+              await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
+            }
+          }
         }
       } catch (err) {
         console.error(`[Process Scheduled] Failed to process message ${msg.id}:`, err);

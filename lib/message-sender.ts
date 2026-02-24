@@ -1,4 +1,5 @@
 import { db } from "@/lib/firebase-admin";
+import { getSubscriptionsByUserIds, sendPushNotification, isPushConfigured } from "@/lib/push";
 import { sendEmail, isEmailConfigured } from "@/lib/nodemailer";
 import { sendSmsGate, isSmsGateConfigured } from "@/lib/sms-gate";
 import { toE164 } from "@/lib/phone";
@@ -109,7 +110,7 @@ export interface SendMessageParams {
   audienceId?: string;
   /** For individual: optional array of member IDs (multiple recipients). */
   audienceIds?: string[];
-  channels: ("email" | "sms" | "whatsapp")[];
+  channels: ("email" | "sms" | "whatsapp" | "push")[];
   senderId: string;
   senderName: string;
   /** If set, use this body instead of the template body (e.g. edited preview). */
@@ -258,7 +259,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
 
   // Get members data
   const membersSnap2 = await db.collection("members").get();
-  const membersMap: Record<string, { name: string; phone: string; email: string; teamIds: string[] }> = {};
+  const membersMap: Record<string, { name: string; phone: string; email: string; teamIds: string[]; notifyPush: boolean }> = {};
   membersSnap2.docs.forEach((d) => {
     const x = d.data();
     const name = (x.name != null && String(x.name).trim()) ? String(x.name).trim() : [x.title, x.firstName, x.lastName].filter(Boolean).join(" ") || x.email || "";
@@ -267,6 +268,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       phone: (x.phone as string) || "",
       email: (x.email as string) || "",
       teamIds: Array.isArray(x.teamIds) ? (x.teamIds as string[]) : [],
+      notifyPush: x.notifyPush != null ? !!x.notifyPush : true,
     };
   });
 
@@ -339,6 +341,12 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+  const pushEnabled = isPushConfigured();
+
+  // Preload push subscriptions once if push is requested
+  const pushSubscriptionsByUser = channels.includes("push") && pushEnabled
+    ? await getSubscriptionsByUserIds(recipientIds)
+    : new Map<string, { userId: string; endpoint: string; keys: { p256dh: string; auth: string } }[]>();
 
   for (const channel of channels) {
     let sent = 0;
@@ -429,6 +437,44 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       totalSent += sent;
       totalFailed += failed;
       summaryParts.push("WhatsApp: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
+    } else if (channel === "push" && pushEnabled) {
+      for (const memberId of recipientIds) {
+        const subs = pushSubscriptionsByUser.get(memberId) ?? [];
+        const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
+        const meta = membersMap[memberId];
+        if (!member || subs.length === 0 || (meta && meta.notifyPush === false)) {
+          failed++;
+          continue;
+        }
+        const text = resolveBody(
+          templateBody,
+          member.name,
+          teamName,
+          senderName,
+          eventName,
+          teamMembersList,
+          teamLeadersList,
+          undefined,
+          teamsListFormatted
+        );
+        let userSent = false;
+        for (const sub of subs) {
+          const ok = await sendPushNotification(
+            { endpoint: sub.endpoint, keys: sub.keys },
+            { title: templateName, body: text, url: "/dashboard" }
+          );
+          if (ok) {
+            sent++;
+            userSent = true;
+          }
+        }
+        if (!userSent) {
+          failed++;
+        }
+      }
+      totalSent += sent;
+      totalFailed += failed;
+      summaryParts.push("Push: " + sent + " sent" + (failed > 0 ? ", " + failed + " failed" : ""));
     }
   }
 

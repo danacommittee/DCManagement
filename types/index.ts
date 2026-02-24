@@ -13,6 +13,9 @@ export interface Member {
   email: string;
   role: Role;
   teamIds: string[];
+  notifyEmail?: boolean;
+  notifySms?: boolean;
+  notifyPush?: boolean;
   /** Display name (e.g. "Title First Last"); may be computed from title + firstName + lastName */
   name: string;
   createdAt?: number;
@@ -78,7 +81,7 @@ export interface Message {
   templateId: string;
   audienceType: "individual" | "sub_team" | "entire_team";
   audienceId?: string;
-  channel: "whatsapp" | "sms" | "email";
+  channel: "whatsapp" | "sms" | "email" | "push";
   recipientIds: string[];
   sentAt: number;
   createdBy: string;
@@ -93,7 +96,7 @@ export interface ScheduledMessage {
   audienceIds?: string[];
   bodyOverride?: string;
   subjectOverride?: string;
-  channels: ("email" | "sms" | "whatsapp")[];
+  channels: ("email" | "sms" | "whatsapp" | "push")[];
   scheduledAt: number; // Unix timestamp in milliseconds
   status: "pending" | "sending" | "sent" | "failed";
   createdAt: number;

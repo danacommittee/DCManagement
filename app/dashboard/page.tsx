@@ -182,10 +182,6 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="mb-6">
-        <PushSubscribe />
-      </div>
-
       {upcomingEvents.length > 0 && (
         <div className="mb-8">
           <h2 className="mb-3 font-medium text-stone-900 dark:text-white">Upcoming events</h2>

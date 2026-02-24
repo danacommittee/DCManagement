@@ -83,6 +83,9 @@ export async function GET(req: NextRequest) {
       phone: data.phone != null ? data.phone : "",
       role,
       teamIds: Array.isArray(data.teamIds) ? data.teamIds : [],
+      notifyEmail: data.notifyEmail != null ? !!data.notifyEmail : true,
+      notifySms: data.notifySms != null ? !!data.notifySms : true,
+      notifyPush: data.notifyPush != null ? !!data.notifyPush : true,
     };
     return NextResponse.json({ member });
   } catch (e) {

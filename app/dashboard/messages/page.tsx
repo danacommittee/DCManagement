@@ -34,6 +34,17 @@ function resolvePreviewBody(
   // Do NOT replace {{Name}}, {{TeamMembers}}, {{TeamLeaders}}, {{TeamsList}} — server fills those per recipient
 }
 
+function getTeamsForEvent(
+  allEvents: { id: string; name: string; teamIds?: string[] }[],
+  allTeams: Team[],
+  eventId?: string | null
+): Team[] {
+  if (!eventId) return allTeams;
+  const ev = allEvents.find((e) => e.id === eventId);
+  if (!ev || !Array.isArray(ev.teamIds)) return allTeams;
+  return allTeams.filter((t) => (ev.teamIds as string[]).includes(t.id));
+}
+
 export default function MessagesPage() {
   const { profile } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -57,7 +68,7 @@ export default function MessagesPage() {
   const [audienceType, setAudienceType] = useState<"individual" | "sub_team" | "entire_team">("entire_team");
   const [audienceId, setAudienceId] = useState("");
   const [audienceIds, setAudienceIds] = useState<string[]>([]);
-  const [channels, setChannels] = useState<("email" | "sms" | "whatsapp")[]>(["email"]);
+  const [channels, setChannels] = useState<("email" | "sms" | "whatsapp" | "push")[]>(["email"]);
   const [recipients, setRecipients] = useState<{ id: string; name: string }[]>([]);
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [previewBody, setPreviewBody] = useState("");
@@ -70,6 +81,9 @@ export default function MessagesPage() {
   const [editRecurrenceTime, setEditRecurrenceTime] = useState("09:00");
   const [editRecurrenceDayOfWeek, setEditRecurrenceDayOfWeek] = useState(1);
   const [editRecurrenceEndDate, setEditRecurrenceEndDate] = useState("");
+  const [editTemplateId, setEditTemplateId] = useState("");
+  const [editEventId, setEditEventId] = useState("");
+  const [editAudienceId, setEditAudienceId] = useState("");
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
   const hasHydratedLastUsed = useRef(false);
   const { toast } = useToast();
@@ -236,7 +250,7 @@ export default function MessagesPage() {
     setPreviewBody(resolvePreviewBody(selectedTemplate.body, { eventName, teamName, senderName }));
   }, [selectedTemplate?.id, selectedTemplate?.body, selectedEvent?.name, audienceType, selectedTeam?.name, profile?.name, profile?.email]);
 
-  const toggleChannel = (ch: "email" | "sms" | "whatsapp") => {
+  const toggleChannel = (ch: "email" | "sms" | "whatsapp" | "push") => {
     if (ch === "whatsapp") return; // WhatsApp disabled for now
     setChannels((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]));
     setSuccess(null);
@@ -548,7 +562,7 @@ export default function MessagesPage() {
           <div>
             <label className="mb-2 block text-sm font-medium text-stone-700 dark:text-stone-300">Channels (select one or more)</label>
             <div className="flex flex-wrap gap-4">
-              {(["email", "sms", "whatsapp"] as const).map((ch) => {
+              {(["email", "sms", "push", "whatsapp"] as const).map((ch) => {
                 const isWhatsApp = ch === "whatsapp";
                 return (
                   <label
@@ -563,7 +577,13 @@ export default function MessagesPage() {
                       className="rounded border-stone-300"
                     />
                     <span className="text-sm capitalize text-stone-700 dark:text-stone-300">
-                      {ch === "whatsapp" ? "WhatsApp (coming soon)" : ch === "sms" ? "SMS" : "Email"}
+                        {ch === "whatsapp"
+                          ? "WhatsApp (coming soon)"
+                          : ch === "sms"
+                          ? "SMS"
+                          : ch === "push"
+                          ? "Push notification"
+                          : "Email"}
                     </span>
                   </label>
                 );
@@ -914,6 +934,9 @@ export default function MessagesPage() {
                               setEditingScheduledId(msg.id);
                               const nextDate = msg.status === "pending" ? msg.scheduledAt : Date.now() + 60 * 60 * 1000;
                               setEditScheduleDateTime(toLocalDatetimeLocalString(new Date(nextDate)));
+                                setEditTemplateId(msg.templateId);
+                                setEditEventId(typeof msg.eventId === "string" ? msg.eventId : "");
+                                setEditAudienceId(typeof msg.audienceId === "string" ? msg.audienceId : "");
                               setEditRecurrence((msg.recurrence === "daily" || msg.recurrence === "weekly") ? msg.recurrence : "none");
                               setEditRecurrenceTime(msg.recurrenceTime ?? "09:00");
                               setEditRecurrenceDayOfWeek(typeof msg.recurrenceDayOfWeek === "number" ? msg.recurrenceDayOfWeek : 1);
@@ -975,6 +998,62 @@ export default function MessagesPage() {
                           min={toLocalDatetimeLocalString(new Date())}
                           className="mb-3 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                         />
+                        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                              Template
+                            </label>
+                            <select
+                              value={editTemplateId || msg.templateId}
+                              onChange={(e) => setEditTemplateId(e.target.value)}
+                              className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                            >
+                              {templatesSorted.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                              Event (optional)
+                            </label>
+                            <select
+                              value={editEventId || (typeof msg.eventId === "string" ? msg.eventId : "")}
+                              onChange={(e) => setEditEventId(e.target.value)}
+                              className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                            >
+                              <option value="">No event</option>
+                              {events.map((ev) => (
+                                <option key={ev.id} value={ev.id}>
+                                  {ev.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        {msg.audienceType === "sub_team" && (
+                          <div className="mb-3">
+                            <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">
+                              Team
+                            </label>
+                            <select
+                              value={editAudienceId || (typeof msg.audienceId === "string" ? msg.audienceId : "")}
+                              onChange={(e) => setEditAudienceId(e.target.value)}
+                              className="w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                            >
+                              <option value="">Select team</option>
+                              {getTeamsForEvent(events, teams, editEventId || (typeof msg.eventId === "string" ? msg.eventId : "")).map(
+                                (t) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.name}
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          </div>
+                        )}
                         <div className="mb-3">
                           <label className="mb-1 block text-sm font-medium text-stone-700 dark:text-stone-300">Recurring</label>
                           <div className="flex flex-wrap gap-3">
@@ -1062,6 +1141,14 @@ export default function MessagesPage() {
                                   body.recurrenceDayOfWeek = editRecurrenceDayOfWeek;
                                   body.recurrenceEndDate = editRecurrenceEndDate.trim() || null;
                                 }
+                                body.templateId = editTemplateId || msg.templateId;
+                                const effectiveEventId = editEventId || (typeof msg.eventId === "string" ? msg.eventId : "");
+                                body.eventId = effectiveEventId || null;
+                                if (msg.audienceType === "sub_team") {
+                                  const effectiveAudienceId =
+                                    editAudienceId || (typeof msg.audienceId === "string" ? msg.audienceId : "");
+                                  body.audienceId = effectiveAudienceId || null;
+                                }
                                 const res = await fetch(`/api/messages/schedule/${msg.id}`, {
                                   method: "PATCH",
                                   headers,
@@ -1106,6 +1193,9 @@ export default function MessagesPage() {
                               setEditRecurrenceTime("09:00");
                               setEditRecurrenceDayOfWeek(1);
                               setEditRecurrenceEndDate("");
+                              setEditTemplateId("");
+                              setEditEventId("");
+                              setEditAudienceId("");
                             }}
                             className="rounded border border-stone-300 px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
                           >

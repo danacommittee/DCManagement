@@ -38,13 +38,27 @@ export async function saveSubscription(
   subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
   userAgent?: string
 ): Promise<void> {
-  await db.collection("push_subscriptions").add({
+  const col = db.collection("push_subscriptions");
+  // Avoid duplicate docs for the same user+endpoint: update existing if present, otherwise add.
+  const existingSnap = await col
+    .where("userId", "==", userId)
+    .where("endpoint", "==", subscription.endpoint)
+    .limit(1)
+    .get();
+
+  const payload = {
     userId,
     endpoint: subscription.endpoint,
     keys: subscription.keys,
     userAgent: userAgent ?? null,
     createdAt: Date.now(),
-  });
+  };
+
+  if (!existingSnap.empty) {
+    await existingSnap.docs[0].ref.set(payload, { merge: true });
+  } else {
+    await col.add(payload);
+  }
 }
 
 /** Get all push subscriptions for a user */
@@ -74,7 +88,10 @@ export async function getSubscriptionsByUserIds(
       const data = d.data() as Omit<PushSubscriptionDoc, "userId"> & { userId: string };
       const userId = data.userId;
       if (!result.has(userId)) result.set(userId, []);
-      result.get(userId)!.push({ ...data, userId });
+      const existing = result.get(userId)!;
+      // De‑duplicate by endpoint per user to avoid multiple notifications on the same device.
+      if (existing.some((s) => s.endpoint === data.endpoint)) return;
+      existing.push({ ...data, userId });
     });
   }
   return result;

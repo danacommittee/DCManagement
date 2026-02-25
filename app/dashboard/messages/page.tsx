@@ -85,6 +85,7 @@ export default function MessagesPage() {
   const [editEventId, setEditEventId] = useState("");
   const [editAudienceId, setEditAudienceId] = useState("");
   const [showScheduledMessages, setShowScheduledMessages] = useState(false);
+  const [expandedScheduleKey, setExpandedScheduleKey] = useState<string | null>(null);
   const hasHydratedLastUsed = useRef(false);
   const { toast } = useToast();
 
@@ -932,15 +933,22 @@ export default function MessagesPage() {
                   sent: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
                   failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
                 };
+                const isExpanded = expandedScheduleKey === group.key;
                 
                 return (
                   <div
-                    key={msg.id}
+                    key={group.key}
                     className="rounded-lg border border-stone-200 bg-stone-50 p-4 dark:border-stone-600 dark:bg-stone-900/30"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="mb-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedScheduleKey((prev) => (prev === group.key ? null : group.key))
+                          }
+                          className="mb-2 flex w-full items-center gap-2 text-left"
+                        >
                           <span className="font-medium text-stone-900 dark:text-white">
                             {template?.name || "Unknown Template"}
                           </span>
@@ -952,7 +960,17 @@ export default function MessagesPage() {
                               Overdue
                             </span>
                           )}
-                        </div>
+                          <svg
+                            className={`ml-auto h-4 w-4 text-stone-500 transition-transform dark:text-stone-400 ${
+                              isExpanded ? "rotate-180" : ""
+                            }`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
                         <div className="space-y-1 text-sm text-stone-600 dark:text-stone-400">
                           <p>
                             <span className="font-medium">Scheduled:</span> {scheduledDate.toLocaleString()}
@@ -1064,6 +1082,74 @@ export default function MessagesPage() {
                         </button>
                       </div>
                     </div>
+                    
+                    {/* Runs list for recurring series */}
+                    {group.isRecurring && isExpanded && (
+                      <div className="mt-3 rounded border border-stone-200 bg-white p-3 text-xs dark:border-stone-600 dark:bg-stone-800">
+                        <p className="mb-2 font-medium text-stone-700 dark:text-stone-200">Runs</p>
+                        <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+                          {items.map((run) => {
+                            const details = run.sendDetails as { recipientId: string; recipientName: string; channels: { channel: string; ok: boolean; error?: string | null }[] }[] | undefined;
+                            return (
+                              <div
+                                key={run.id}
+                                className="rounded border border-stone-200 bg-stone-50/50 py-2 px-2 dark:border-stone-600 dark:bg-stone-900/30"
+                              >
+                                <div className="mb-1.5 flex items-center justify-between">
+                                  <p className="font-medium text-stone-700 dark:text-stone-200">
+                                    {new Date(run.scheduledAt).toLocaleString()}
+                                  </p>
+                                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                                    run.status === "sent" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" :
+                                    run.status === "failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" :
+                                    run.status === "sending" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" :
+                                    "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+                                  }`}>
+                                    {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
+                                  </span>
+                                </div>
+                                {run.sentAt && (
+                                  <p className="mb-1.5 text-stone-500 dark:text-stone-400">
+                                    Sent at {new Date(run.sentAt).toLocaleString()}
+                                  </p>
+                                )}
+                                {run.error && (
+                                  <p className="mb-1.5 text-red-600 dark:text-red-400">
+                                    {run.error}
+                                  </p>
+                                )}
+                                {details && details.length > 0 && (
+                                  <div className="mt-2 border-t border-stone-200 pt-2 dark:border-stone-600">
+                                    <p className="mb-1 font-medium text-stone-600 dark:text-stone-300">Per recipient & channel</p>
+                                    <ul className="space-y-2">
+                                      {details.map((rec) => (
+                                        <li key={rec.recipientId} className="rounded border border-stone-200 bg-white py-1.5 px-2 dark:border-stone-600 dark:bg-stone-800">
+                                          <p className="font-medium text-stone-800 dark:text-stone-200">{rec.recipientName}</p>
+                                          <ul className="mt-1 space-y-0.5 pl-2">
+                                            {rec.channels.map((ch) => (
+                                              <li key={ch.channel} className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
+                                                <span className="capitalize">{ch.channel}:</span>
+                                                {ch.ok ? (
+                                                  <span className="text-green-600 dark:text-green-400">✓ Sent</span>
+                                                ) : (
+                                                  <span className="text-red-600 dark:text-red-400">
+                                                    ✗ Failed{ch.error ? ` — ${ch.error}` : ""}
+                                                  </span>
+                                                )}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                     
                     {/* Edit form */}
                     {editingScheduledId === msg.id && (

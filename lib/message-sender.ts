@@ -119,14 +119,30 @@ export interface SendMessageParams {
   subjectOverride?: string;
 }
 
+/** Per-channel result for one recipient */
+export interface ChannelResult {
+  channel: "email" | "sms" | "whatsapp" | "push";
+  ok: boolean;
+  error?: string;
+}
+
+/** Per-recipient send result (all channels attempted for this recipient) */
+export interface RecipientSendResult {
+  recipientId: string;
+  recipientName: string;
+  channels: ChannelResult[];
+}
+
 export interface SendMessageResult {
   ok: boolean;
   sent: number;
   failed: number;
   recipientCount: number;
-  recipientIds?: string[]; // Optional: return recipient IDs for logging
+  recipientIds?: string[];
   message?: string;
   error?: string;
+  /** Per-recipient, per-channel results for scheduled run details */
+  details?: RecipientSendResult[];
 }
 
 export async function sendMessages(params: SendMessageParams): Promise<SendMessageResult> {
@@ -348,6 +364,21 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
     ? await getSubscriptionsByUserIds(recipientIds)
     : new Map<string, { userId: string; endpoint: string; keys: { p256dh: string; auth: string } }[]>();
 
+  // Per-recipient, per-channel results for details (e.g. scheduled run breakdown)
+  const detailsByRecipient = new Map<string, { recipientName: string; channels: ChannelResult[] }>();
+  for (const memberId of recipientIds) {
+    const m = membersMap[memberId];
+    detailsByRecipient.set(memberId, {
+      recipientName: m?.name ?? memberId,
+      channels: [],
+    });
+  }
+
+  const addChannelResult = (memberId: string, channel: "email" | "sms" | "whatsapp" | "push", ok: boolean, error?: string) => {
+    const entry = detailsByRecipient.get(memberId);
+    if (entry) entry.channels.push({ channel, ok, error: error ?? undefined });
+  };
+
   for (const channel of channels) {
     let sent = 0;
     let failed = 0;
@@ -370,6 +401,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
       for (const memberId of recipientIds) {
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         if (!member || !member.email) {
+          addChannelResult(memberId, "email", false, "No email address");
           failed++;
           continue;
         }
@@ -396,9 +428,11 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         });
         if (result.ok) {
           sent++;
+          addChannelResult(memberId, "email", true);
         } else {
           console.error("Email send failed for", memberId, result.error);
           if (result.error && !lastError) lastError = String(result.error);
+          addChannelResult(memberId, "email", false, result.error ?? "Send failed");
           failed++;
         }
       }
@@ -422,7 +456,9 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
         if (!member || !e164) {
-          lastError = member ? "Phone invalid (missing or incorrect format)." : "Member not found.";
+          const err = member ? "Phone invalid (missing or incorrect format)." : "Member not found.";
+          lastError = err;
+          addChannelResult(memberId, "sms", false, err);
           failed++;
           continue;
         }
@@ -442,12 +478,14 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           const result = await sendSmsGate({ message: text, phoneNumbers: [e164] });
           if (result.ok) {
             sent++;
+            addChannelResult(memberId, "sms", true);
             if (result.messageId) {
               console.log(`[SMS Gate] Scheduled message sent to ${e164}, messageId: ${result.messageId}`);
             }
           } else {
             console.error("SMS Gate send failed for", memberId, result.error);
             if (result.error) lastError = String(result.error);
+            addChannelResult(memberId, "sms", false, result.error ?? "Send failed");
             failed++;
           }
         } else if (sid && authToken && fromNumber) {
@@ -455,9 +493,12 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           try {
             await client.messages.create({ body: text, from: fromNumber, to: e164 });
             sent++;
+            addChannelResult(memberId, "sms", true);
           } catch (err) {
             console.error("Twilio SMS send failed for", memberId, err);
-            if (!lastError) lastError = err instanceof Error ? err.message : String(err);
+            const errMsg = err instanceof Error ? err.message : String(err);
+            if (!lastError) lastError = errMsg;
+            addChannelResult(memberId, "sms", false, errMsg);
             failed++;
           }
         }
@@ -477,6 +518,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         const { member, teamName, teamMembersList, teamLeadersList, teamsListFormatted } = getContextForMember(memberId);
         const e164 = member ? toE164(member.phone) : null;
         if (!member || !e164) {
+          addChannelResult(memberId, "whatsapp", false, !member ? "Member not found." : "Phone invalid or missing.");
           failed++;
           continue;
         }
@@ -495,9 +537,12 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         try {
           await client.messages.create({ body: text, from: `whatsapp:${fromNumber}`, to: `whatsapp:${e164}` });
           sent++;
+          addChannelResult(memberId, "whatsapp", true);
         } catch (err) {
           console.error("Twilio WhatsApp send failed for", memberId, err);
-          if (!lastError) lastError = err instanceof Error ? err.message : String(err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (!lastError) lastError = errMsg;
+          addChannelResult(memberId, "whatsapp", false, errMsg);
           failed++;
         }
       }
@@ -518,16 +563,19 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
         const meta = membersMap[memberId];
         if (!member) {
           if (!lastError) lastError = "Member not found.";
+          addChannelResult(memberId, "push", false, "Member not found.");
           failed++;
           continue;
         }
         if (meta && meta.notifyPush === false) {
           if (!lastError) lastError = "Push is disabled in settings for this user.";
+          addChannelResult(memberId, "push", false, "Push is disabled in settings.");
           failed++;
           continue;
         }
         if (subs.length === 0) {
           if (!lastError) lastError = "No push subscription found for this user (device not enabled).";
+          addChannelResult(memberId, "push", false, "No push subscription (device not enabled).");
           failed++;
           continue;
         }
@@ -543,6 +591,7 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           teamsListFormatted
         );
         let userSent = false;
+        let pushError: string | undefined;
         for (const sub of subs) {
           const res = await sendPushNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
@@ -551,13 +600,13 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
           if (res.ok) {
             sent++;
             userSent = true;
-          } else if (res.error && !lastError) {
-            lastError = res.error;
+          } else {
+            if (res.error && !lastError) lastError = res.error;
+            pushError = res.error;
           }
         }
-        if (!userSent) {
-          failed++;
-        }
+        addChannelResult(memberId, "push", userSent, userSent ? undefined : (pushError ?? "Send failed"));
+        if (!userSent) failed++;
       }
       totalSent += sent;
       totalFailed += failed;
@@ -573,13 +622,20 @@ export async function sendMessages(params: SendMessageParams): Promise<SendMessa
 
   const message = summaryParts.length > 0 ? summaryParts.join("; ") : "No messages sent";
   const allFailed = totalSent === 0 && totalFailed > 0;
+  const details: RecipientSendResult[] = Array.from(detailsByRecipient.entries()).map(([recipientId, { recipientName, channels }]) => ({
+    recipientId,
+    recipientName,
+    channels,
+  }));
+
   return {
     ok: !allFailed,
     sent: totalSent,
     failed: totalFailed,
     recipientCount: recipientIds.length,
-    recipientIds, // Return recipient IDs for logging
+    recipientIds,
     message,
     error: allFailed ? message : undefined,
+    details,
   };
 }

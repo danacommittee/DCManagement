@@ -58,6 +58,22 @@ function isPastRecurrenceEnd(nextAt: number, recurrenceEndDate: string | null | 
   return nextStr > endStr;
 }
 
+/** Build Firestore-safe sendDetails (no undefined). */
+function firestoreSafeSendDetails(
+  details: { recipientId: string; recipientName: string; channels: { channel: string; ok: boolean; error?: string }[] }[] | undefined
+): unknown[] | null {
+  if (!details || details.length === 0) return null;
+  return details.map((r) => ({
+    recipientId: r.recipientId,
+    recipientName: r.recipientName,
+    channels: r.channels.map((c) => ({
+      channel: c.channel,
+      ok: c.ok,
+      error: c.error != null ? c.error : null,
+    })),
+  }));
+}
+
 /**
  * This endpoint processes scheduled messages that are due to be sent.
  * It should be called periodically (e.g., via Vercel Cron Jobs or external cron service).
@@ -185,10 +201,12 @@ export async function GET(req: NextRequest) {
         });
 
         const now = Date.now();
+        const sendDetails = firestoreSafeSendDetails(sendResult.details);
         if (sendResult.ok && sendResult.failed === 0) {
           await db.collection("scheduledMessages").doc(msg.id).update({
             status: "sent",
             sentAt: now,
+            ...(sendDetails != null ? { sendDetails } : {}),
           });
           processed++;
           console.log(`[Process Scheduled] Successfully sent message ${msg.id}`);
@@ -221,6 +239,7 @@ export async function GET(req: NextRequest) {
             status: "sent",
             sentAt: now,
             error: `Partial: ${sendResult.failed} failed`,
+            ...(sendDetails != null ? { sendDetails } : {}),
           });
           processed++;
           console.log(`[Process Scheduled] Partially sent message ${msg.id} (${sendResult.sent} sent, ${sendResult.failed} failed)`);
@@ -253,6 +272,7 @@ export async function GET(req: NextRequest) {
             status: "failed",
             error: sendResult.error || "Unknown error",
             sentAt: now,
+            ...(sendDetails != null ? { sendDetails } : {}),
           });
           failed++;
           console.error(`[Process Scheduled] Failed to send message ${msg.id}:`, sendResult.error);

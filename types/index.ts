@@ -109,6 +109,12 @@ export interface ScheduledMessage {
   recurrenceDayOfWeek?: number; // 0=Sun .. 6=Sat, for weekly
   /** Optional end date for recurrence (YYYY-MM-DD). No next run is created after this date. */
   recurrenceEndDate?: string | null;
+  /** Per-recipient, per-channel results for this run (stored after send). */
+  sendDetails?: {
+    recipientId: string;
+    recipientName: string;
+    channels: { channel: string; ok: boolean; error?: string | null }[];
+  }[];
 }
 
 export interface AttendanceRecord {

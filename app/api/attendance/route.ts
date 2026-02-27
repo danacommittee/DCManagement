@@ -188,8 +188,15 @@ export async function POST(req: NextRequest) {
     const email = decoded.email?.toLowerCase();
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    const myId = membersSnap.docs[0].id;
-    const rawRole = membersSnap.docs[0].data().role;
+    const meDoc = membersSnap.docs[0];
+    const myId = meDoc.id;
+    const meData = meDoc.data();
+    const myDisplayName =
+      (meData.name && String(meData.name).trim()) ||
+      [meData.title, meData.firstName, meData.lastName].filter(Boolean).join(" ") ||
+      meData.email ||
+      "";
+    const rawRole = meData.role;
     let myRole: "member" | "admin" | "super_admin";
     if (typeof rawRole === "string") {
       const normalized = rawRole.trim().toLowerCase().replace(/\s+/g, "_");

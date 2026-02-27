@@ -25,9 +25,8 @@ export default function TeamsPage() {
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [eventLoading, setEventLoading] = useState(false);
   const [eventForContext, setEventForContext] = useState<EventType & { teams?: { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[] }[]; teamOverrides?: EventType["teamOverrides"] } | null>(null);
-  const [eventTeams, setEventTeams] = useState<
-    { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[]; isCustom: boolean }
-  >([]);
+  type EventTeamRow = { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[]; isCustom: boolean };
+  const [eventTeams, setEventTeams] = useState<EventTeamRow[]>([]);
   const [editingEventTeamId, setEditingEventTeamId] = useState<string | null>(null);
   const [eventEditMode, setEventEditMode] = useState<"default" | "custom">("default");
   const [eventEditMemberIds, setEventEditMemberIds] = useState<string[]>([]);

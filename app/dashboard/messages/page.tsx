@@ -73,6 +73,7 @@ export default function MessagesPage() {
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [previewBody, setPreviewBody] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
+  const [previewDirty, setPreviewDirty] = useState(false);
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
   const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
   const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
@@ -307,6 +308,7 @@ export default function MessagesPage() {
     const senderName =
       (profile?.name != null && String(profile.name).trim()) || profile?.email || "";
     setPreviewBody(resolvePreviewBody(selectedTemplate.body, { eventName, teamName, senderName }));
+    setPreviewDirty(false);
   }, [selectedTemplate?.id, selectedTemplate?.body, selectedEvent?.name, audienceType, selectedTeam?.name, profile?.name, profile?.email]);
 
   const toggleChannel = (ch: "email" | "sms" | "whatsapp" | "push") => {
@@ -419,11 +421,13 @@ export default function MessagesPage() {
         audienceType,
         audienceId: audienceType !== "entire_team" ? audienceId || undefined : undefined,
         audienceIds: audienceType === "individual" && audienceIds.length > 0 ? audienceIds : undefined,
-        bodyOverride: previewBody.trim() || undefined,
         subjectOverride: channels.includes("email") && emailSubject.trim() ? emailSubject.trim() : undefined,
         channels: channels.filter((c) => c !== "whatsapp"),
         scheduledAt: scheduledTimestamp,
       };
+      if (previewDirty && previewBody.trim()) {
+        body.bodyOverride = previewBody.trim();
+      }
       if (scheduleRecurrence === "daily") {
         body.recurrence = "daily";
         body.recurrenceTime = scheduleRecurrenceTime;
@@ -853,7 +857,10 @@ export default function MessagesPage() {
           {selectedTemplate ? (
             <textarea
               value={previewBody}
-              onChange={(e) => setPreviewBody(e.target.value)}
+              onChange={(e) => {
+                setPreviewBody(e.target.value);
+                setPreviewDirty(true);
+              }}
               placeholder="Select a template to see preview…"
               rows={12}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm leading-relaxed text-stone-800 dark:border-stone-600 dark:bg-stone-700 dark:text-white dark:placeholder-stone-400"

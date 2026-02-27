@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
     }
     if (bodyOverride) {
       scheduledMessage.bodyOverride = bodyOverride;
+      scheduledMessage.useTemplateBody = false;
     }
     if (subjectOverride) {
       scheduledMessage.subjectOverride = subjectOverride;

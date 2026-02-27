@@ -3,28 +3,14 @@ import { db } from "@/lib/firebase-admin";
 import type { ScheduledMessage } from "@/types";
 import { sendMessages } from "@/lib/message-sender";
 
-/** Compute next run timestamp for recurring: daily at recurrenceTime, or weekly on recurrenceDayOfWeek at recurrenceTime. */
-function getNextScheduledAt(opts: {
-  recurrence: "daily" | "weekly";
-  recurrenceTime: string;
-  recurrenceDayOfWeek?: number;
-  afterTimestamp: number;
-}): number {
-  const [h, m] = opts.recurrenceTime.split(":").map(Number);
-  const after = new Date(opts.afterTimestamp);
-  const next = new Date(after);
-  next.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
-
+/** Compute next run timestamp for recurring messages, based on the previous scheduledAt. */
+function getNextScheduledAt(opts: { recurrence: "daily" | "weekly"; baseTimestamp: number }): number {
+  const DAY_MS = 24 * 60 * 60 * 1000;
   if (opts.recurrence === "daily") {
-    if (next.getTime() <= opts.afterTimestamp) next.setDate(next.getDate() + 1);
-    return next.getTime();
+    return opts.baseTimestamp + DAY_MS;
   }
-  // weekly: next occurrence of recurrenceDayOfWeek (0=Sun .. 6=Sat)
-  const targetDay = opts.recurrenceDayOfWeek ?? 0;
-  let daysToAdd = (targetDay - next.getDay() + 7) % 7;
-  if (daysToAdd === 0 && next.getTime() <= opts.afterTimestamp) daysToAdd = 7;
-  next.setDate(next.getDate() + daysToAdd);
-  return next.getTime();
+  // weekly
+  return opts.baseTimestamp + 7 * DAY_MS;
 }
 
 /** Build Firestore-safe payload for next recurring occurrence (no undefined values). */
@@ -43,7 +29,10 @@ function nextRecurrencePayload(msg: ScheduledMessage, nextAt: number, now: numbe
   if (msg.eventId != null && msg.eventId !== "") o.eventId = msg.eventId;
   if (msg.audienceId != null && msg.audienceId !== "") o.audienceId = msg.audienceId;
   if (Array.isArray(msg.audienceIds) && msg.audienceIds.length > 0) o.audienceIds = msg.audienceIds;
-  if (msg.bodyOverride != null && msg.bodyOverride !== "") o.bodyOverride = msg.bodyOverride;
+  if (msg.useTemplateBody === false && msg.bodyOverride != null && msg.bodyOverride !== "") {
+    o.bodyOverride = msg.bodyOverride;
+    o.useTemplateBody = false;
+  }
   if (msg.subjectOverride != null && msg.subjectOverride !== "") o.subjectOverride = msg.subjectOverride;
   if (msg.recurrence === "weekly" && msg.recurrenceDayOfWeek != null) o.recurrenceDayOfWeek = msg.recurrenceDayOfWeek;
   if (msg.recurrenceEndDate != null && String(msg.recurrenceEndDate).trim() !== "") o.recurrenceEndDate = String(msg.recurrenceEndDate).trim().slice(0, 10);
@@ -187,13 +176,15 @@ export async function GET(req: NextRequest) {
           "";
 
         // Send the message using the shared send function
+        const useTemplateBody = (msg as any).useTemplateBody;
         const sendResult = await sendMessages({
           templateId: msg.templateId,
           eventId: msg.eventId || null,
           audienceType: msg.audienceType,
           audienceId: msg.audienceId != null && String(msg.audienceId).trim() !== "" ? msg.audienceId : undefined,
           audienceIds: Array.isArray(msg.audienceIds) && msg.audienceIds.length > 0 ? msg.audienceIds : undefined,
-          bodyOverride: typeof msg.bodyOverride === "string" ? msg.bodyOverride : undefined,
+          bodyOverride:
+            useTemplateBody === false && typeof msg.bodyOverride === "string" ? msg.bodyOverride : undefined,
           subjectOverride: typeof msg.subjectOverride === "string" ? msg.subjectOverride : undefined,
           channels: msg.channels,
           senderId: msg.createdBy,
@@ -211,22 +202,19 @@ export async function GET(req: NextRequest) {
           processed++;
           console.log(`[Process Scheduled] Successfully sent message ${msg.id}`);
           // Schedule next occurrence for recurring (unless past recurrenceEndDate)
-          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+          if (msg.recurrence === "daily" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "daily",
-              recurrenceTime: msg.recurrenceTime,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
               console.log(`[Process Scheduled] Created next daily run at ${new Date(nextAt).toISOString()}`);
             }
-          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+          } else if (msg.recurrence === "weekly" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "weekly",
-              recurrenceTime: msg.recurrenceTime,
-              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
@@ -244,21 +232,18 @@ export async function GET(req: NextRequest) {
           processed++;
           console.log(`[Process Scheduled] Partially sent message ${msg.id} (${sendResult.sent} sent, ${sendResult.failed} failed)`);
           // Still schedule next occurrence for recurring
-          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+          if (msg.recurrence === "daily" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "daily",
-              recurrenceTime: msg.recurrenceTime,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
             }
-          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+          } else if (msg.recurrence === "weekly" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "weekly",
-              recurrenceTime: msg.recurrenceTime,
-              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
@@ -277,21 +262,18 @@ export async function GET(req: NextRequest) {
           failed++;
           console.error(`[Process Scheduled] Failed to send message ${msg.id}:`, sendResult.error);
 
-          if (msg.recurrence === "daily" && msg.recurrenceTime) {
+          if (msg.recurrence === "daily" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "daily",
-              recurrenceTime: msg.recurrenceTime,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));
             }
-          } else if (msg.recurrence === "weekly" && msg.recurrenceTime != null && msg.recurrenceDayOfWeek != null) {
+          } else if (msg.recurrence === "weekly" && typeof msg.scheduledAt === "number") {
             const nextAt = getNextScheduledAt({
               recurrence: "weekly",
-              recurrenceTime: msg.recurrenceTime,
-              recurrenceDayOfWeek: msg.recurrenceDayOfWeek,
-              afterTimestamp: now,
+              baseTimestamp: msg.scheduledAt,
             });
             if (!isPastRecurrenceEnd(nextAt, msg.recurrenceEndDate)) {
               await db.collection("scheduledMessages").add(nextRecurrencePayload(msg, nextAt, now));

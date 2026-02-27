@@ -125,7 +125,11 @@ export async function PATCH(
     if (body.audienceIds !== undefined) {
       updates.audienceIds = Array.isArray(body.audienceIds) ? body.audienceIds.filter((id: unknown) => typeof id === "string").map((id: string) => String(id).trim()) : null;
     }
-    if (body.bodyOverride !== undefined) updates.bodyOverride = body.bodyOverride ? String(body.bodyOverride).trim() : null;
+    if (body.bodyOverride !== undefined) {
+      const trimmed = body.bodyOverride ? String(body.bodyOverride).trim() : "";
+      updates.bodyOverride = trimmed || null;
+      updates.useTemplateBody = trimmed ? false : true;
+    }
     if (body.subjectOverride !== undefined) updates.subjectOverride = body.subjectOverride ? String(body.subjectOverride).trim() : null;
 
     await db.collection("scheduledMessages").doc(id).update(updates);

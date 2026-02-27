@@ -10,8 +10,15 @@ export async function GET(req: NextRequest) {
     const email = decoded.email?.toLowerCase();
     const membersSnap = await db.collection("members").where("email", "==", email).limit(1).get();
     if (membersSnap.empty) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    const myId = membersSnap.docs[0].id;
-    const rawRole = membersSnap.docs[0].data().role;
+    const meDoc = membersSnap.docs[0];
+    const myId = meDoc.id;
+    const meData = meDoc.data();
+    const myDisplayName =
+      (meData.name && String(meData.name).trim()) ||
+      [meData.title, meData.firstName, meData.lastName].filter(Boolean).join(" ") ||
+      meData.email ||
+      "";
+    const rawRole = meData.role;
     let myRole: "member" | "admin" | "super_admin";
     if (typeof rawRole === "string") {
       const normalized = rawRole.trim().toLowerCase().replace(/\s+/g, "_");
@@ -41,6 +48,7 @@ export async function GET(req: NextRequest) {
         teamId: x.teamId,
         date: x.date,
         submittedBy: x.submittedBy,
+        submittedByName: x.submittedByName,
         presentIds: Array.isArray(x.presentIds) ? x.presentIds : [],
         absentIds: Array.isArray(x.absentIds) ? x.absentIds : [],
         startTime: x.startTime,
@@ -138,7 +146,9 @@ export async function GET(req: NextRequest) {
             endTime: rec.endTime,
             notes: rec.notes,
             submittedBy: rec.submittedBy,
-            submittedByName: rec.submittedBy ? (membersMap.get(rec.submittedBy as string) ?? undefined) : undefined,
+            submittedByName:
+              rec.submittedByName ??
+              (rec.submittedBy ? (membersMap.get(rec.submittedBy as string) ?? undefined) : undefined),
           }
         : null;
       return NextResponse.json({ records, record, members });
@@ -281,6 +291,7 @@ export async function POST(req: NextRequest) {
         teamId,
         date,
         submittedBy: myId,
+        submittedByName: myDisplayName,
         presentIds: newPresent,
         absentIds: newAbsent,
         updatedAt: now,
@@ -327,6 +338,7 @@ export async function POST(req: NextRequest) {
       presentIds,
       absentIds,
       submittedBy: myId,
+      submittedByName: myDisplayName,
       updatedAt: now,
     };
     if (startTime != null) docData.startTime = startTime;
@@ -340,6 +352,7 @@ export async function POST(req: NextRequest) {
       teamId,
       date,
       submittedBy: myId,
+      submittedByName: myDisplayName,
       presentIds,
       absentIds,
       createdAt: now,

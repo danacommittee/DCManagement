@@ -36,6 +36,9 @@ export async function PATCH(
     if (typeof body.lastName === "string") updates.lastName = body.lastName;
     if (typeof body.itsNumber === "string") updates.itsNumber = body.itsNumber;
     if (typeof body.phone === "string") updates.phone = body.phone;
+    if (isSuperAdmin && typeof body.email === "string") {
+      updates.email = body.email.trim().toLowerCase();
+    }
     if (typeof body.name === "string") updates.name = body.name;
     if (isSuperAdmin && Array.isArray(body.teamIds)) updates.teamIds = body.teamIds;
     if (typeof body.notifyPush === "boolean") updates.notifyPush = body.notifyPush;

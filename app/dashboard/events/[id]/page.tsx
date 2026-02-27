@@ -38,6 +38,8 @@ export default function EventDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [editMemberIds, setEditMemberIds] = useState<string[]>([]);
+  const [editLeaderId, setEditLeaderId] = useState<string>("");
+  const [editLeader2Id, setEditLeader2Id] = useState<string>("");
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
@@ -237,11 +239,19 @@ export default function EventDetailPage() {
   const startEditTeam = (team: EventTeam) => {
     setEditingTeamId(team.id);
     setEditMemberIds([...team.memberIds]);
+    setEditLeaderId(team.leaderId ?? "");
+    setEditLeader2Id(team.leader2Id ?? "");
   };
 
   const saveTeamOverride = async () => {
     if (!id || !editingTeamId || !isSuperAdmin) return;
-    const teamOverrides = { ...(event?.teamOverrides ?? {}), [editingTeamId]: { memberIds: editMemberIds } };
+    const currentOverrides = event?.teamOverrides ?? {};
+    const override: { memberIds?: string[]; leaderId?: string; leader2Id?: string } = {
+      memberIds: editMemberIds,
+    };
+    if (editLeaderId) override.leaderId = editLeaderId;
+    if (editLeader2Id) override.leader2Id = editLeader2Id;
+    const teamOverrides = { ...currentOverrides, [editingTeamId]: override };
     try {
       const headers = await getAuthHeaders();
       const res = await fetch(`/api/events/${id}`, {
@@ -524,15 +534,6 @@ export default function EventDetailPage() {
           >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
               <h3 className="text-sm font-medium text-stone-900 dark:text-white">{t.name}</h3>
-              {isSuperAdmin && editingTeamId !== t.id && (
-                <button
-                  type="button"
-                  onClick={() => startEditTeam(t)}
-                  className="text-xs text-amber-600 hover:underline dark:text-amber-400"
-                >
-                  Edit
-                </button>
-              )}
             </div>
             {editingTeamId === t.id ? (
               <div>
@@ -549,6 +550,41 @@ export default function EventDetailPage() {
                       <span className="truncate">{m.name}</span>
                     </label>
                   ))}
+                </div>
+                <div className="mb-3 space-y-2">
+                  <p className="text-xs font-medium text-stone-600 dark:text-stone-300">Team leads for this event:</p>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+                      <span>Leader</span>
+                      <select
+                        value={editLeaderId}
+                        onChange={(e) => setEditLeaderId(e.target.value)}
+                        className="rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                      >
+                        <option value="">Use team default</option>
+                        {members.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+                      <span>Second leader (optional)</span>
+                      <select
+                        value={editLeader2Id}
+                        onChange={(e) => setEditLeader2Id(e.target.value)}
+                        className="rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                      >
+                        <option value="">Use team default</option>
+                        {members.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -569,6 +605,21 @@ export default function EventDetailPage() {
               </div>
             ) : (
               <div className="text-xs text-stone-600 dark:text-stone-400">
+                <p className="mb-1">
+                  <span className="font-medium">Leads: </span>
+                  {(() => {
+                    const leadNames: string[] = [];
+                    if (t.leaderId) {
+                      const m = members.find((x) => x.id === t.leaderId);
+                      leadNames.push(m?.name ?? t.leaderId);
+                    }
+                    if (t.leader2Id && t.leader2Id !== t.leaderId) {
+                      const m2 = members.find((x) => x.id === t.leader2Id);
+                      leadNames.push(m2?.name ?? t.leader2Id);
+                    }
+                    return leadNames.length > 0 ? leadNames.join(", ") : "None";
+                  })()}
+                </p>
                 {t.memberIds.length === 0 ? (
                   <span className="text-stone-400">No members</span>
                 ) : (

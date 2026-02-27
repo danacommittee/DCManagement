@@ -261,6 +261,7 @@ export default function MembersPage() {
       lastName: m.lastName != null ? m.lastName : "",
       itsNumber: m.itsNumber != null ? m.itsNumber : "",
       phone: m.phone != null ? m.phone : "",
+      email: m.email ?? "",
       role: m.role,
     });
   };
@@ -673,8 +674,13 @@ export default function MembersPage() {
                           className="w-full rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
                         />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-stone-500 dark:text-stone-400" title="Email cannot be changed">
-                        {m.email}
+                      <td className="whitespace-nowrap px-4 py-2">
+                        <input
+                          type="email"
+                          value={editForm.email != null ? editForm.email : m.email}
+                          onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                          className="w-full rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                        />
                       </td>
                       <td className="whitespace-nowrap px-4 py-2">
                         <select

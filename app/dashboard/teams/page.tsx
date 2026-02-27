@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthHeaders } from "@/lib/api";
-import type { Team } from "@/types";
+import type { Team, Event as EventType } from "@/types";
 import type { Member } from "@/types";
 
 export default function TeamsPage() {
   const { profile } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [events, setEvents] = useState<EventType[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -21,6 +22,17 @@ export default function TeamsPage() {
   const [memberSearch, setMemberSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState("");
   const [teamSort, setTeamSort] = useState<"name-asc" | "name-desc" | "size-desc">("name-asc");
+  const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [eventLoading, setEventLoading] = useState(false);
+  const [eventForContext, setEventForContext] = useState<EventType & { teams?: { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[] }[]; teamOverrides?: EventType["teamOverrides"] } | null>(null);
+  const [eventTeams, setEventTeams] = useState<
+    { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[]; isCustom: boolean }
+  >([]);
+  const [editingEventTeamId, setEditingEventTeamId] = useState<string | null>(null);
+  const [eventEditMode, setEventEditMode] = useState<"default" | "custom">("default");
+  const [eventEditMemberIds, setEventEditMemberIds] = useState<string[]>([]);
+  const [eventEditLeaderId, setEventEditLeaderId] = useState<string>("");
+  const [eventEditLeader2Id, setEventEditLeader2Id] = useState<string>("");
 
   const isSuper = profile?.role === "super_admin";
 
@@ -28,9 +40,10 @@ export default function TeamsPage() {
 
   const fetchData = async () => {
     const headers = await getAuthHeaders();
-    const [teamsRes, membersRes] = await Promise.all([
+    const [teamsRes, membersRes, eventsRes] = await Promise.all([
       fetch("/api/teams", { headers }),
       profile?.role !== "member" ? fetch("/api/members", { headers }) : Promise.resolve(null),
+      profile?.role !== "member" ? fetch("/api/events?limit=100", { headers }) : Promise.resolve(null),
     ]);
     if (teamsRes.ok) {
       const d = await teamsRes.json();
@@ -39,6 +52,10 @@ export default function TeamsPage() {
     if (membersRes?.ok) {
       const d = await membersRes.json();
       setMembers(d.members);
+    }
+    if (eventsRes?.ok) {
+      const d = await eventsRes.json();
+      setEvents(d.events ?? []);
     }
     setLoading(false);
   };
@@ -163,10 +180,115 @@ export default function TeamsPage() {
     );
   }
 
+  const isSuperAdmin = profile?.role === "super_admin";
+
+  const loadEventContext = async (eventId: string) => {
+    if (!eventId) {
+      setEventForContext(null);
+      setEventTeams([]);
+      return;
+    }
+    setEventLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/events/${eventId}`, { headers });
+      if (!res.ok) {
+        setEventForContext(null);
+        setEventTeams([]);
+        return;
+      }
+      const d = await res.json();
+      const ev = d.event as EventType & {
+        teams?: { id: string; name: string; leaderId: string | null; leader2Id: string | null; memberIds: string[] }[];
+        teamOverrides?: EventType["teamOverrides"];
+      };
+      setEventForContext(ev);
+      const overrides = ev.teamOverrides ?? {};
+      const teamsWithFlag =
+        ev.teams?.map((t) => ({
+          ...t,
+          isCustom: !!overrides?.[t.id],
+        })) ?? [];
+      setEventTeams(teamsWithFlag);
+    } catch (e) {
+      console.error(e);
+      setEventForContext(null);
+      setEventTeams([]);
+    } finally {
+      setEventLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedEventId) {
+      setEventForContext(null);
+      setEventTeams([]);
+      return;
+    }
+    loadEventContext(selectedEventId);
+  }, [selectedEventId]);
+
+  const startEditEventTeam = (teamId: string) => {
+    if (!eventForContext) return;
+    const baseTeam = teams.find((t) => t.id === teamId);
+    const override = eventForContext.teamOverrides?.[teamId];
+    const effective = eventTeams.find((t) => t.id === teamId);
+    const memberIds =
+      override?.memberIds ??
+      (effective ? effective.memberIds : baseTeam && Array.isArray(baseTeam.memberIds) ? baseTeam.memberIds : []);
+    const leaderId =
+      override?.leaderId ??
+      (effective ? effective.leaderId : baseTeam?.leaderId ?? "");
+    const leader2Id =
+      override?.leader2Id ??
+      (effective ? effective.leader2Id : baseTeam?.leader2Id ?? "");
+
+    setEditingEventTeamId(teamId);
+    setEventEditMemberIds(memberIds ?? []);
+    setEventEditLeaderId(leaderId ?? "");
+    setEventEditLeader2Id(leader2Id ?? "");
+    setEventEditMode(override ? "custom" : "default");
+  };
+
+  const saveEventTeamOverride = async () => {
+    if (!selectedEventId || !eventForContext || !editingEventTeamId || !isSuperAdmin) return;
+    const currentOverrides = eventForContext.teamOverrides ?? {};
+    const nextOverrides = { ...currentOverrides };
+
+    if (eventEditMode === "default") {
+      delete (nextOverrides as Record<string, unknown>)[editingEventTeamId];
+    } else {
+      nextOverrides[editingEventTeamId] = {
+        memberIds: eventEditMemberIds,
+        ...(eventEditLeaderId ? { leaderId: eventEditLeaderId } : {}),
+        ...(eventEditLeader2Id ? { leader2Id: eventEditLeader2Id } : {}),
+      };
+    }
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/events/${selectedEventId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ teamOverrides: nextOverrides }),
+      });
+      if (res.ok) {
+        setEditingEventTeamId(null);
+        await loadEventContext(selectedEventId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const cancelEventTeamEdit = () => {
+    setEditingEventTeamId(null);
+  };
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-stone-900 dark:text-white">Teams</h1>
-      {isSuper && (
+      {isSuper && !selectedEventId && (
         <div className="mb-6 flex gap-2">
           <input
             type="text"
@@ -185,8 +307,103 @@ export default function TeamsPage() {
           </button>
         </div>
       )}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="text-sm text-stone-600 dark:text-stone-300">
+          View teams for:
+        </label>
+        <select
+          value={selectedEventId}
+          onChange={(e) => setSelectedEventId(e.target.value)}
+          className="rounded border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-800 dark:text-white"
+        >
+          <option value="">Default teams (no event)</option>
+          {events.map((ev) => (
+            <option key={ev.id} value={ev.id}>
+              {ev.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {loading ? (
         <p className="text-stone-500">Loading...</p>
+      ) : selectedEventId ? (
+        <div className="space-y-4">
+          {eventLoading ? (
+            <p className="text-stone-500">Loading event teams...</p>
+          ) : !eventForContext ? (
+            <p className="text-stone-500">Event not found or you do not have access.</p>
+          ) : (
+            <>
+              <p className="text-sm text-stone-600 dark:text-stone-300">
+                Editing teams for event:{" "}
+                <span className="font-medium text-stone-900 dark:text-white">{eventForContext.name}</span>
+              </p>
+              <div className="space-y-3">
+                {eventTeams.length === 0 ? (
+                  <p className="text-stone-500 dark:text-stone-400">
+                    No teams are assigned to this event yet. Edit the event to select teams.
+                  </p>
+                ) : (
+                  eventTeams.map((t) => {
+                    const baseTeam = teams.find((bt) => bt.id === t.id);
+                    const defaultMemberCount = Array.isArray(baseTeam?.memberIds) ? baseTeam!.memberIds.length : 0;
+                    const isCustom = t.isCustom;
+                    const effectiveCount = t.memberIds.length;
+                    const leaderNames: string[] = [];
+                    if (t.leaderId) {
+                      const m = members.find((x) => x.id === t.leaderId);
+                      leaderNames.push(m?.name ?? t.leaderId);
+                    }
+                    if (t.leader2Id && t.leader2Id !== t.leaderId) {
+                      const m2 = members.find((x) => x.id === t.leader2Id);
+                      leaderNames.push(m2?.name ?? t.leader2Id);
+                    }
+                    return (
+                      <div
+                        key={t.id}
+                        className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-800"
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-stone-900 dark:text-white">{t.name}</p>
+                            <p className="text-xs text-stone-500 dark:text-stone-400">
+                              {isCustom ? "Customized for this event" : "Using default team roster"}
+                            </p>
+                          </div>
+                          {isSuperAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => startEditEventTeam(t.id)}
+                              className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
+                            >
+                              Edit for this event
+                            </button>
+                          )}
+                        </div>
+                        <div className="text-xs text-stone-600 dark:text-stone-400">
+                          <p className="mb-1">
+                            <span className="font-medium">Leads:</span>{" "}
+                            {leaderNames.length > 0 ? leaderNames.join(", ") : "None"}
+                          </p>
+                          <p className="mb-1">
+                            <span className="font-medium">Members:</span>{" "}
+                            {effectiveCount} member{effectiveCount === 1 ? "" : "s"}
+                            {isCustom && defaultMemberCount > 0
+                              ? ` (default ${defaultMemberCount})`
+                              : defaultMemberCount > 0 && !isCustom
+                              ? ` (from default team)`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -337,6 +554,117 @@ export default function TeamsPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {editingEventTeamId && eventForContext && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-lg dark:bg-stone-800">
+            <h2 className="mb-2 text-sm font-semibold text-stone-900 dark:text-white">
+              Edit team for event
+            </h2>
+            <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">
+              Event: <span className="font-medium">{eventForContext.name}</span>
+            </p>
+            <div className="mb-3 space-y-2 rounded border border-stone-200 p-2 dark:border-stone-600">
+              <p className="mb-1 text-xs font-medium text-stone-700 dark:text-stone-300">
+                Roster mode
+              </p>
+              <div className="flex flex-col gap-1 text-xs text-stone-700 dark:text-stone-300">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={eventEditMode === "default"}
+                    onChange={() => setEventEditMode("default")}
+                    className="rounded"
+                  />
+                  <span>Use default team roster</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={eventEditMode === "custom"}
+                    onChange={() => setEventEditMode("custom")}
+                    className="rounded"
+                  />
+                  <span>Customize for this event</span>
+                </label>
+              </div>
+            </div>
+            {eventEditMode === "custom" && (
+              <div className="mb-3 space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs text-stone-700 dark:text-stone-300">
+                    <span>Leader</span>
+                    <select
+                      value={eventEditLeaderId}
+                      onChange={(e) => setEventEditLeaderId(e.target.value)}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    >
+                      <option value="">Use default</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-stone-700 dark:text-stone-300">
+                    <span>Second leader (optional)</span>
+                    <select
+                      value={eventEditLeader2Id}
+                      onChange={(e) => setEventEditLeader2Id(e.target.value)}
+                      className="rounded border border-stone-300 px-2 py-1.5 text-xs dark:border-stone-600 dark:bg-stone-700 dark:text-white"
+                    >
+                      <option value="">Use default</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-stone-700 dark:text-stone-300">
+                    Members for this event
+                  </p>
+                  <div className="max-h-40 space-y-1 overflow-y-auto border border-stone-200 p-2 text-xs dark:border-stone-600">
+                    {members.map((m) => (
+                      <label key={m.id} className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={eventEditMemberIds.includes(m.id)}
+                          onChange={() =>
+                            setEventEditMemberIds((prev) =>
+                              prev.includes(m.id) ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                            )
+                          }
+                          className="rounded"
+                        />
+                        <span className="truncate">{m.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelEventTeamEdit}
+                className="rounded border border-stone-300 px-3 py-1.5 text-xs text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEventTeamOverride}
+                className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

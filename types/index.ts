@@ -96,6 +96,8 @@ export interface ScheduledMessage {
   audienceIds?: string[];
   bodyOverride?: string;
   subjectOverride?: string;
+  /** If false, always use bodyOverride; otherwise use latest template body. */
+  useTemplateBody?: boolean;
   channels: ("email" | "sms" | "whatsapp" | "push")[];
   scheduledAt: number; // Unix timestamp in milliseconds
   status: "pending" | "sending" | "sent" | "failed";

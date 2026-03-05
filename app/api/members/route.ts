@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authAdmin, db } from "@/lib/firebase-admin";
+import { toE164 } from "@/lib/phone";
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("Authorization");
@@ -62,8 +63,12 @@ export async function POST(req: NextRequest) {
     const hasName = firstName !== "" || lastName !== "";
     if (!hasName) return NextResponse.json({ error: "First name or last name is required" }, { status: 400 });
 
-    const phoneVal = typeof body.phone === "string" ? body.phone.trim() : "";
-    if (!phoneVal) return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
+    const phoneRaw = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!phoneRaw) return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
+    const phoneVal = toE164(phoneRaw);
+    if (!phoneVal) {
+      return NextResponse.json({ error: "Invalid phone number format" }, { status: 400 });
+    }
 
     const existing = await db.collection("members").where("email", "==", emailVal).limit(1).get();
     if (!existing.empty) return NextResponse.json({ error: "A member with this email already exists" }, { status: 400 });

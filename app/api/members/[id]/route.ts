@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authAdmin, db } from "@/lib/firebase-admin";
+import { toE164 } from "@/lib/phone";
 
 export async function PATCH(
   req: NextRequest,
@@ -35,7 +36,18 @@ export async function PATCH(
     if (typeof body.firstName === "string") updates.firstName = body.firstName;
     if (typeof body.lastName === "string") updates.lastName = body.lastName;
     if (typeof body.itsNumber === "string") updates.itsNumber = body.itsNumber;
-    if (typeof body.phone === "string") updates.phone = body.phone;
+    if (typeof body.phone === "string") {
+      const raw = body.phone.trim();
+      if (!raw) {
+        updates.phone = "";
+      } else {
+        const normalized = toE164(raw);
+        if (!normalized) {
+          return NextResponse.json({ error: "Invalid phone number format" }, { status: 400 });
+        }
+        updates.phone = normalized;
+      }
+    }
     if (isSuperAdmin && typeof body.email === "string") {
       updates.email = body.email.trim().toLowerCase();
     }

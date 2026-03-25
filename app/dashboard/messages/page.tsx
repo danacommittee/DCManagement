@@ -1056,25 +1056,47 @@ export default function MessagesPage() {
                         <button
                           type="button"
                           onClick={async () => {
-                            if (!confirm("Delete this scheduled message?")) return;
+                            const idsToDelete = group.isRecurring ? items.map((run) => run.id) : [msg.id];
+                            const confirmText = group.isRecurring
+                              ? `Delete this recurring series permanently?\n\nThis will remove all ${idsToDelete.length} run(s) from the database.`
+                              : "Delete this scheduled message permanently from the database?";
+                            if (!confirm(confirmText)) return;
                             try {
                               const headers = await getAuthHeaders();
-                              const res = await fetch(`/api/messages/schedule/${msg.id}`, {
-                                method: "DELETE",
-                                headers,
-                              });
-                              if (res.ok) {
+                              const results = await Promise.all(
+                                idsToDelete.map(async (id) => {
+                                  const res = await fetch(`/api/messages/schedule/${id}`, {
+                                    method: "DELETE",
+                                    headers,
+                                  });
+                                  if (res.ok) return { ok: true as const };
+                                  const data = await res.json().catch(() => ({}));
+                                  return { ok: false as const, error: data.error as string | undefined };
+                                })
+                              );
+                              const failed = results.filter((r) => !r.ok);
+                              if (failed.length === 0) {
                                 await fetchScheduledMessages();
                                 setSuccess({
-                                  message: "Scheduled message deleted",
+                                  message:
+                                    idsToDelete.length > 1
+                                      ? `Recurring series deleted (${idsToDelete.length} run(s) removed)`
+                                      : "Scheduled message deleted",
                                   sent: 0,
                                   failed: 0,
                                   recipientCount: 0,
                                 });
-                                toast("Scheduled message deleted");
+                                toast(
+                                  idsToDelete.length > 1
+                                    ? `Recurring series deleted (${idsToDelete.length} run(s))`
+                                    : "Scheduled message deleted"
+                                );
                               } else {
-                                const data = await res.json().catch(() => ({}));
-                                const err = data.error || "Failed to delete scheduled message";
+                                const firstErr = failed[0];
+                                const err =
+                                  firstErr && "error" in firstErr && firstErr.error
+                                    ? firstErr.error
+                                    : `Failed to delete ${failed.length} of ${idsToDelete.length} item(s)`;
                                 setError(err);
                                 toast(err, "error");
                               }

@@ -40,6 +40,13 @@ interface DashboardStats {
   teamsWithoutAttendanceToday?: number;
 }
 
+interface PendingAttendanceSummary {
+  role: "member" | "admin" | "super_admin";
+  today: string;
+  pendingSelfEvents: { eventId: string; eventName: string; dates: string[] }[];
+  pendingTeams: { eventId: string; eventName: string; teamId: string; teamName: string; dates: string[] }[];
+}
+
 interface UpcomingEvent {
   id: string;
   name: string;
@@ -89,6 +96,7 @@ export default function DashboardPage() {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [scheduledMessagesCount, setScheduledMessagesCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [pendingAttendance, setPendingAttendance] = useState<PendingAttendanceSummary | null>(null);
 
   useEffect(() => {
     if (profile?.role === "member") {
@@ -101,10 +109,11 @@ export default function DashboardPage() {
     if (profile?.role === "member") return;
     const run = async () => {
       const headers = await getAuthHeaders();
-      const [dashboardRes, eventsRes, scheduleRes] = await Promise.all([
+      const [dashboardRes, eventsRes, scheduleRes, pendingRes] = await Promise.all([
         fetch("/api/dashboard", { headers }),
         fetch("/api/events?upcoming=true&limit=5", { headers }),
         fetch("/api/messages/schedule", { headers }),
+        fetch("/api/attendance/pending", { headers }),
       ]);
       if (dashboardRes.ok) {
         const data = await dashboardRes.json();
@@ -119,6 +128,10 @@ export default function DashboardPage() {
         const list = Array.isArray(d.scheduledMessages) ? d.scheduledMessages : [];
         setScheduledMessagesCount(list.length);
       }
+      if (pendingRes.ok) {
+        const d = await pendingRes.json();
+        setPendingAttendance(d);
+      }
       setLoading(false);
     };
     run();
@@ -130,6 +143,7 @@ export default function DashboardPage() {
   }
 
   const canManageAttendance = profile?.role === "admin" || profile?.role === "super_admin";
+  const pendingTeamsCount = pendingAttendance?.pendingTeams.reduce((sum, item) => sum + item.dates.length, 0) ?? 0;
 
   return (
     <div>
@@ -160,16 +174,36 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {(stats.teamsWithoutAttendanceToday != null && stats.teamsWithoutAttendanceToday > 0) || scheduledMessagesCount > 0 ? (
+      {(pendingTeamsCount > 0 || scheduledMessagesCount > 0) && (
         <div className="mb-6 rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-700 dark:bg-stone-900/30">
           <h2 className="mb-2 text-sm font-medium text-stone-700 dark:text-stone-300">Where I need to act</h2>
           <ul className="space-y-1 text-sm">
-            {stats.teamsWithoutAttendanceToday != null && stats.teamsWithoutAttendanceToday > 0 && (
-              <li>
-                <Link href="/dashboard/attendance" className="font-medium text-amber-700 hover:underline dark:text-amber-400">
-                  Attendance due today ({stats.teamsWithoutAttendanceToday} team{stats.teamsWithoutAttendanceToday !== 1 ? "s" : ""})
-                </Link>
-              </li>
+            {pendingTeamsCount > 0 && (
+              <>
+                <li className="text-stone-700 dark:text-stone-200">
+                  Attendance pending ({pendingTeamsCount} day{pendingTeamsCount !== 1 ? "s" : ""})
+                </li>
+                {pendingAttendance?.pendingTeams.slice(0, 3).map((item) => (
+                  <li key={`${item.eventId}:${item.teamId}`} className="text-stone-600 dark:text-stone-300">
+                    <div className="font-medium">
+                      {item.eventName} — {item.teamName}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-1 text-xs">
+                      {item.dates.map((d) => (
+                        <Link
+                          key={d}
+                          href={`/dashboard/attendance?eventId=${encodeURIComponent(
+                            item.eventId
+                          )}&teamId=${encodeURIComponent(item.teamId)}&date=${encodeURIComponent(d)}`}
+                          className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-100"
+                        >
+                          {d}
+                        </Link>
+                      ))}
+                    </div>
+                  </li>
+                ))}
+              </>
             )}
             {scheduledMessagesCount > 0 && (
               <li>
@@ -180,7 +214,7 @@ export default function DashboardPage() {
             )}
           </ul>
         </div>
-      ) : null}
+      )}
 
       {profile?.notifyPush !== true && (
         <div className="mb-6 rounded-xl border border-dashed border-amber-200 bg-amber-50 p-4 dark:border-amber-700/60 dark:bg-amber-900/20">

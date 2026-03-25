@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
@@ -629,6 +630,7 @@ function MemberAttendanceView({
   const [marked, setMarked] = useState<Record<string, boolean>>({});
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [eventDateById, setEventDateById] = useState<Record<string, string>>({});
+  const [pendingEvents, setPendingEvents] = useState<{ eventId: string; eventName: string; dates: string[] }[]>([]);
 
   const eventTeamKey = (eventId: string, teamId: string, dateStr?: string) =>
     dateStr ? `${eventId}:${teamId}:${dateStr}` : `${eventId}:${teamId}`;
@@ -677,6 +679,19 @@ function MemberAttendanceView({
       return changed ? next : prev;
     });
   }, [events]);
+
+  useEffect(() => {
+    fetch("/api/attendance/pending")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => {
+        if (d && Array.isArray(d.pendingSelfEvents)) {
+          setPendingEvents(d.pendingSelfEvents);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, []);
 
   useEffect(() => {
     fetch("/api/attendance/venue")
@@ -766,6 +781,34 @@ function MemberAttendanceView({
       <p className="mb-4 text-sm text-stone-600 dark:text-stone-400">
         Mark your attendance for event days. You can only mark yourself present for the teams you belong to. No future dates.
       </p>
+
+      {pendingEvents.length > 0 && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+          <p className="mb-2 font-medium text-amber-900 dark:text-amber-200">
+            You have pending attendance to mark
+          </p>
+          <ul className="space-y-1">
+            {pendingEvents.map((ev) => (
+              <li key={ev.eventId}>
+                <div className="font-medium text-amber-900 dark:text-amber-200">{ev.eventName}</div>
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  {ev.dates.map((d) => (
+                    <Link
+                      key={d}
+                      href={`/dashboard/attendance?eventId=${encodeURIComponent(ev.eventId)}&date=${encodeURIComponent(
+                        d
+                      )}`}
+                      className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-100"
+                    >
+                      {d}
+                    </Link>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {focusedEvent && urlDate && (
         <div className="mb-6">

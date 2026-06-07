@@ -1,0 +1,308 @@
+/* ═══════════════════════════════════════════════════════════
+   LabelGenerator.css
+   Screen styles + print styles for the label sheet layout
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Force background colors to print ─────────────────────── */
+.lg-print-area * {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+/* ─── Wrapper ───────────────────────────────────────────────── */
+.lg-wrap {
+  font-family: Arial, sans-serif;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+  color: #222;
+}
+
+.lg-title {
+  font-size: 1.4rem;
+  margin: 0 0 16px;
+}
+
+/* ─── Controls bar ──────────────────────────────────────────── */
+.lg-controls {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #fff;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  margin-bottom: 16px;
+  align-items: flex-end;
+}
+
+.lg-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lg-ctrl label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.lg-ctrl select,
+.lg-ctrl input[type='date'] {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.lg-btn-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.lg-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lg-btn-primary { background: #1a73e8; color: #fff; }
+.lg-btn-primary:hover { background: #1557b0; }
+.lg-btn-secondary { background: #eee; color: #333; }
+.lg-btn-secondary:hover { background: #ddd; }
+
+/* ─── Legend ─────────────────────────────────────────────────── */
+.lg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+
+.lg-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.lg-legend-dot {
+  width: 22px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ─── Table ──────────────────────────────────────────────────── */
+.lg-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+}
+
+.lg-table thead tr { background: #f0f0f0; }
+
+.lg-table th {
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 12px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid #ddd;
+}
+
+.lg-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.lg-table tr:last-child td { border-bottom: none; }
+.lg-table tr:hover td { background: #f8f8f8; }
+.lg-table tr.lg-row-empty td { opacity: 0.4; }
+
+.lg-cat-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.lg-table td input[type='text'] {
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.lg-table td input[type='text']:focus {
+  outline: none;
+  border-color: #1a73e8;
+}
+
+.lg-qty-input {
+  width: 50px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ─── Screen Preview ─────────────────────────────────────────── */
+.lg-preview-section {
+  margin-top: 20px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.lg-preview-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lg-preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lg-preview-label {
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.lg-preview-label.size-small { width: 168px; height: 64px; }
+.lg-preview-label.size-large { width: 256px; height: 128px; }
+
+.lg-preview-stripe { height: 7px; }
+
+.lg-preview-body {
+  padding: 4px 7px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: calc(100% - 7px);
+}
+
+.lg-preview-cat   { font-size: 7px;  color: #777; text-transform: uppercase; letter-spacing: 0.3px; }
+.lg-preview-name  { font-size: 10px; font-weight: 700; line-height: 1.2; margin: 1px 0; }
+.lg-preview-srv   { font-size: 8px;  color: #555; }
+.lg-preview-label.size-small .lg-preview-date { font-size: 6pt;   color: #222; margin-top: 1.5pt; font-weight: 900; }
+
+.lg-preview-label.size-large .lg-preview-stripe { height: 12px; }
+.lg-preview-label.size-large .lg-preview-cat    { font-size: 9px; }
+.lg-preview-label.size-large .lg-preview-name   { font-size: 13px; margin: 3px 0; }
+.lg-preview-label.size-large .lg-preview-srv    { font-size: 10px; }
+.lg-preview-label.size-large .lg-preview-date   { font-size: 8.5pt; color: #222; margin-top: 3pt; font-weight: 900; }
+
+/* ─── Print Area (screen) ────────────────────────────────────── */
+.lg-print-area { display: none; }
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT STYLES
+   ═══════════════════════════════════════════════════════════ */
+@media print {
+  /* Hide everything except the print area */
+  body > *,
+  #root > * { display: none !important; }
+
+  /* Show only our print container.
+     If LabelGenerator is nested, you may need to also show its ancestors —
+     see integration notes in README. */
+  .lg-print-area { display: block !important; }
+
+  @page { size: 8.5in 11in; margin: 0; }
+}
+
+/* ─── Label sheet wrapper — one per page ────────────────────── */
+.lg-label-sheet {
+  width: 8.5in;
+  height: 11in;
+  overflow: hidden;
+  page-break-after: always;
+  break-after: page;
+}
+
+/* ── Avery 5160 / 5960   1" × 2.625"   30 per sheet ── */
+.lg-sheet-small {
+  padding: 0.5in 0.1875in;
+  display: grid;
+  grid-template-columns: 2.625in 2.625in 2.625in;
+  grid-auto-rows: 1in;
+  column-gap: 0.125in;
+  row-gap: 0;
+  box-sizing: border-box;
+}
+
+/* ── 2" × 4"   10 per sheet ── */
+.lg-sheet-large {
+  padding: 0.5in 0.19in;
+  display: grid;
+  grid-template-columns: 4in 4in;
+  grid-auto-rows: 2in;
+  column-gap: 0.12in;
+  row-gap: 0;
+  box-sizing: border-box;
+}
+
+/* ─── Individual label cell ──────────────────────────────────── */
+.lg-lbl {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.lg-lbl-stripe { flex-shrink: 0; }
+
+.lg-lbl-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Small label */
+.lg-sheet-small .lg-lbl-stripe { height: 0.1in; }
+.lg-sheet-small .lg-lbl-body   { padding: 0.04in 0.07in; }
+.lg-sheet-small .lg-lbl-cat    { font-size: 5.5pt; color: #666; text-transform: uppercase; letter-spacing: 0.3pt; }
+.lg-sheet-small .lg-lbl-name   { font-size: 8.5pt; font-weight: bold; line-height: 1.15; margin: 1pt 0; }
+.lg-sheet-small .lg-lbl-srv    { font-size: 6.5pt; color: #444; }
+.lg-sheet-small .lg-lbl-date   { font-size: 6pt;   color: #222; margin-top: 1.5pt; font-weight: 900; }
+
+/* Large label */
+.lg-sheet-large .lg-lbl-stripe { height: 0.15in; }
+.lg-sheet-large .lg-lbl-body   { padding: 0.1in 0.14in; }
+.lg-sheet-large .lg-lbl-cat    { font-size: 8pt;   color: #555; text-transform: uppercase; letter-spacing: 0.5pt; }
+.lg-sheet-large .lg-lbl-name   { font-size: 14pt;  font-weight: bold; line-height: 1.2; margin: 4pt 0; }
+.lg-sheet-large .lg-lbl-srv    { font-size: 9.5pt; color: #333; }
+.lg-sheet-large .lg-lbl-date   { font-size: 8.5pt; color: #222; margin-top: 3pt; font-weight: 900; }

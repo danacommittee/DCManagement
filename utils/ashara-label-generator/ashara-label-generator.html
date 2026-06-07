@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ashara Label Generator</title>
+<style>
+/* ─── Screen UI ───────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+/* Force background colors to print */
+* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+body {
+  font-family: Arial, sans-serif;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #f9f9f9;
+  color: #222;
+}
+h1 { font-size: 1.4rem; margin: 0 0 16px; }
+.controls {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #fff;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  margin-bottom: 16px;
+  align-items: flex-end;
+}
+.ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+.ctrl-group label { font-size: 11px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.4px; }
+.ctrl-group select,
+.ctrl-group input[type="date"],
+.ctrl-group input[type="text"] {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 13px;
+  background: #fff;
+}
+button {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.btn-print { background: #1a73e8; color: #fff; }
+.btn-print:hover { background: #1557b0; }
+.btn-secondary { background: #eee; color: #333; }
+.btn-secondary:hover { background: #ddd; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+.legend-dot { width: 22px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #ddd; }
+thead tr { background: #f0f0f0; }
+th { padding: 9px 10px; text-align: left; font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid #ddd; }
+td { padding: 7px 10px; border-bottom: 1px solid #eee; vertical-align: middle; font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f8f8f8; }
+
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #fff;
+  white-space: nowrap;
+}
+.cat-bar { width: 10px; height: 10px; border-radius: 1px; }
+
+td input[type="text"] {
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+td input[type="text"]:focus { outline: none; border-color: #1a73e8; }
+
+.dimmed td { opacity: 0.4; }
+.dimmed td input { opacity: 0.7; }
+
+.screen-preview {
+  margin-top: 20px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.screen-preview h3 { margin: 0 0 12px; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+.preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Mini label preview on screen */
+.preview-label {
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #fff;
+}
+.preview-label.size-small { width: 168px; height: 64px; }
+.preview-label.size-large { width: 256px; height: 128px; }
+.preview-stripe { height: 7px; }
+.preview-body { padding: 4px 7px; display: flex; flex-direction: column; justify-content: center; height: calc(100% - 7px); }
+.preview-cat { font-size: 7px; color: #777; text-transform: uppercase; letter-spacing: 0.3px; }
+.preview-name { font-size: 10px; font-weight: 700; line-height: 1.2; margin: 1px 0; }
+.preview-serving { font-size: 8px; color: #555; }
+.preview-label.size-small .preview-date { font-size: 6pt; color: #222; margin-top: 1.5pt; font-weight: 900; }
+.preview-label.size-large .preview-stripe { height: 12px; }
+.preview-label.size-large .preview-cat { font-size: 9px; }
+.preview-label.size-large .preview-name { font-size: 13px; margin: 3px 0; }
+.preview-label.size-large .preview-serving { font-size: 10px; }
+.preview-label.size-large .preview-date { font-size: 8.5pt; color: #222; margin-top: 3pt; font-weight: 900; }
+
+/* ─── Print Styles ────────────────────────────────────────── */
+@media print {
+  body > *:not(#print-area) { display: none !important; }
+  #print-area { display: block !important; }
+  @page { size: 8.5in 11in; margin: 0; }
+}
+
+#print-area { display: none; }
+
+/* Label sheet wrapper — one per printed page */
+.label-sheet {
+  width: 8.5in;
+  min-height: 11in;
+  page-break-after: always;
+  break-after: page;
+  overflow: hidden;
+}
+
+/* ── Avery 5160 / 5960  1" × 2.625"  30 per sheet ── */
+.sheet-small {
+  padding-top: 0.5in;
+  padding-bottom: 0.5in;
+  padding-left: 0.1875in;
+  padding-right: 0.1875in;
+  display: grid;
+  grid-template-columns: 2.625in 2.625in 2.625in;
+  grid-auto-rows: 1in;
+  column-gap: 0.125in;
+  row-gap: 0in;
+}
+
+/* ── 2" × 4"  10 per sheet ── */
+.sheet-large {
+  padding-top: 0.5in;
+  padding-bottom: 0.5in;
+  padding-left: 0.19in;
+  padding-right: 0.19in;
+  display: grid;
+  grid-template-columns: 4in 4in;
+  grid-auto-rows: 2in;
+  column-gap: 0.12in;
+  row-gap: 0in;
+}
+
+/* Individual label cell */
+.lbl {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.lbl-stripe { flex-shrink: 0; }
+.lbl-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Small label text */
+.sheet-small .lbl-stripe { height: 0.1in; }
+.sheet-small .lbl-body { padding: 0.04in 0.07in 0.04in 0.07in; }
+.sheet-small .lbl-cat  { font-size: 5.5pt; color: #666; text-transform: uppercase; letter-spacing: 0.3pt; }
+.sheet-small .lbl-name { font-size: 8.5pt; font-weight: bold; line-height: 1.15; margin: 1pt 0; }
+.sheet-small .lbl-srv  { font-size: 6.5pt; color: #444; }
+.sheet-small .lbl-date { font-size: 6pt; color: #222; margin-top: 1.5pt; font-weight: 900; }
+
+/* Large label text */
+.sheet-large .lbl-stripe { height: 0.15in; }
+.sheet-large .lbl-body { padding: 0.1in 0.14in; }
+.sheet-large .lbl-cat  { font-size: 8pt; color: #555; text-transform: uppercase; letter-spacing: 0.5pt; }
+.sheet-large .lbl-name { font-size: 14pt; font-weight: bold; line-height: 1.2; margin: 4pt 0; }
+.sheet-large .lbl-srv  { font-size: 9.5pt; color: #333; }
+.sheet-large .lbl-date { font-size: 8.5pt; color: #222; margin-top: 3pt; font-weight: 900; }
+</style>
+</head>
+<body>
+
+<h1>🖨 Ashara Mubarakah Label Generator</h1>
+
+<!-- Controls -->
+<div class="controls">
+  <div class="ctrl-group">
+    <label>Meal</label>
+    <select id="mealSelect" onchange="loadMeal()" style="min-width:260px">
+      <option value="">— Select a Meal —</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>Date of Prep</label>
+    <input type="date" id="prepDate">
+  </div>
+  <div class="ctrl-group">
+    <label>Label Size</label>
+    <select id="labelSize" onchange="refreshPreview()">
+      <option value="small">Small — 1" × 2⅝"  (30 / sheet, Avery 5160)</option>
+      <option value="large">Large — 2" × 4"  (10 / sheet)</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:8px;align-items:flex-end">
+    <button class="btn-print" onclick="printLabels()">🖨 Print Labels</button>
+    <button class="btn-secondary" onclick="selectAll(true)">Check All</button>
+    <button class="btn-secondary" onclick="selectAll(false)">Uncheck All</button>
+  </div>
+</div>
+
+<!-- Color Legend -->
+<div class="legend" id="legend"></div>
+
+<!-- Editable Items Table -->
+<table>
+  <thead>
+    <tr>
+      <th style="width:40px">Print</th>
+      <th style="width:130px">Category</th>
+      <th>Item Name</th>
+      <th style="width:220px">Serving Style</th>
+      <th style="width:60px;text-align:center">Qty</th>
+    </tr>
+  </thead>
+  <tbody id="itemsBody"></tbody>
+</table>
+
+<!-- Screen Preview -->
+<div class="screen-preview" id="previewSection" style="display:none">
+  <h3>Label Preview</h3>
+  <div class="preview-grid" id="previewGrid"></div>
+</div>
+
+<!-- Print Area (hidden on screen) -->
+<div id="print-area"></div>
+
+<script>
+// ─── Category Config ────────────────────────────────────────
+const CATS = {
+  1:   { label: 'Salt',                 color: '#FFFFFF' },
+  2:   { label: 'Sweet',                color: '#F8BBD0' },
+  3:   { label: 'Kharas',               color: '#8D6E63' },
+  4:   { label: 'Tarkari / Curry',      color: '#F4A261' },
+  5:   { label: 'Roti',                 color: '#F5DEB3' },
+  '6a':{ label: 'Main Course - Rice',   color: '#BDBDBD' },
+  '6b':{ label: 'Main Course - Gravy',  color: '#FFD54F' },
+  7:   { label: 'Salad / Pickle',       color: '#388E3C' },
+  8:   { label: 'Fruit',                color: '#7B1FA2' },
+  9:   { label: 'Drink',                color: '#1565C0' },
+};
+
+function catColorStyle(hex) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const color = luminance > 0.6 ? '#333' : '#fff';
+  const border = luminance > 0.75 ? '1px solid #ccc' : 'none';
+  return `background:${hex};color:${color};border:${border}`;
+}
+
+// ─── Full Menu Database ─────────────────────────────────────
+// items: [{ cat, name, serving }]  — name='' means not served that meal
+const MEALS = [
+  { id:'n1', title:'Night 1 — Dinner', sub:'Muharram 1', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Chana Bateta (Chickpea & Potato)',  serving:''},
+    {cat:4,   name:'Red Meat Curry',                    serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Dal Chawal (Lentil Rice)',           serving:''},
+    {cat:'6b',name:'Palidu (Gravy)',                     serving:'Serve with Rice'},
+    {cat:7,   name:'Mixed Pickle — Mango & Lime',       serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d1', title:'Day 1 — Lunch', sub:'Muharram 1', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'',                                  serving:''},
+    {cat:4,   name:'Potato & Meat Curry',               serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Pickle (Achar)',                    serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Juice / Sharbat',                   serving:''},
+  ]},
+  { id:'n2', title:'Night 2 — Dinner', sub:'Muharram 2', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Halwa (Sweet Pudding)',              serving:''},
+    {cat:3,   name:'Local Kharas (Vegetable or Meat)',  serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'Dal Gosht (Lentil Meat Gravy)',     serving:'Serve with Rice'},
+    {cat:7,   name:'Pickle (Achar)',                    serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d2', title:'Day 2 — Lunch', sub:'Muharram 2', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Veg Noodles (Live)',                serving:''},
+    {cat:4,   name:'Nihari (Slow-Cooked Meat Stew)',    serving:'Serve with Roti'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Tempered Red Lentil Khichdi',       serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Pickle (Achar)',                    serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Honey Water',                       serving:''},
+  ]},
+  { id:'n3', title:'Night 3 — Dinner', sub:'Muharram 3', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Maleeda (Sweet Bread Pudding)',     serving:''},
+    {cat:3,   name:'Dahi Vada (Lentil Dumplings in Yogurt)', serving:''},
+    {cat:4,   name:'Kazi & Meat Curry',                 serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Lemon Pickle',                      serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d3', title:'Day 3 — Lunch', sub:'Muharram 3', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Haneeth / Spiced Meat (Starter)',   serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Breadsticks with Cheese Dip',       serving:''},
+    {cat:'6a',name:'Hasha with Meat',                   serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Green Salad with Honey Mustard Dressing', serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Rose Syrup Drink',                  serving:''},
+  ]},
+  { id:'n4', title:'Night 4 — Dinner', sub:'Muharram 4', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Carrot Halwa / Dry Fruit Halwa',    serving:''},
+    {cat:3,   name:'Local Kharas (Vegetable or Meat)',  serving:''},
+    {cat:4,   name:'Whole Red Lentil Meat Curry',       serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Yogurt with Cornflakes',            serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d4', title:'Day 4 — Lunch', sub:'Muharram 4', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Kachumber (Cucumber Salad)',        serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Meat & Red Lentil Pilaf',           serving:''},
+    {cat:'6b',name:'Kadhi (Yogurt Curry)',               serving:'Serve with Rice'},
+    {cat:7,   name:'Shafout (Flatbread with Yogurt)',   serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Rose Water',                        serving:''},
+  ]},
+  { id:'n5', title:'Night 5 — Dinner', sub:'Muharram 5', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Local Sweet Dish',                  serving:''},
+    {cat:3,   name:'Daba Gosht (Slow-Cooked Pot Meat)', serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Garlic Bread / Naan',        serving:''},
+    {cat:'6a',name:'Steamed Rice with Banana',          serving:''},
+    {cat:'6b',name:'Veg Sweet & Sour Gravy',            serving:'Serve with Rice'},
+    {cat:7,   name:'Yogurt Boondi Salad',               serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d5', title:'Day 5 — Lunch', sub:'Muharram 5', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'',                                  serving:''},
+    {cat:4,   name:'Palak Bhaji Live (Spinach Stir Fry)', serving:'Serve with Roti'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'White Meat Biryani',                serving:''},
+    {cat:'6b',name:'Mamho / Chamas',                    serving:'Serve with Biryani'},
+    {cat:7,   name:'Chickpea & Cucumber Salad',         serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'',                                  serving:''},
+  ]},
+  { id:'n6', title:'Night 6 — Dinner', sub:'Muharram 6', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Sholo (Sweet Saffron Rice)',        serving:''},
+    {cat:3,   name:'Cream Pasta',                       serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Manda / Baguette',                  serving:''},
+    {cat:'6a',name:'Khichdi',                           serving:''},
+    {cat:'6b',name:'Khurdi (Light Broth)',               serving:'Serve with Khichdi'},
+    {cat:7,   name:'Cream & Cheese with Baguette',      serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d6', title:'Day 6 — Lunch', sub:'Muharram 6', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Maleeda (Sweet Bread Pudding)',     serving:''},
+    {cat:3,   name:'Black Pepper Butter Meat',          serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'',                                  serving:''},
+    {cat:'6a',name:'Red Lentil Meat Hasha',             serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Lebanese Fattoush / Banana Cucumber Salad', serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Yogurt (Packed)',                   serving:''},
+  ]},
+  { id:'n7', title:'Night 7 — Dinner', sub:'Muharram 7', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'',                                  serving:''},
+    {cat:4,   name:'Pav Bhaji',                         serving:'Serve with Pav'},
+    {cat:5,   name:'Pav (Dinner Rolls)',                serving:''},
+    {cat:'6a',name:'Akhni Pilaf',                       serving:''},
+    {cat:'6b',name:'Spinach Soup (Palak Soup)',          serving:'Serve with Akhni'},
+    {cat:7,   name:'Pickle (Achar)',                    serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d7', title:'Day 7 — Lunch', sub:'Muharram 7', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'',                                  serving:''},
+    {cat:4,   name:'Seasonal Vegetable Curry',          serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Meat Biryani',                      serving:''},
+    {cat:'6b',name:'Mamho',                             serving:'Serve with Biryani'},
+    {cat:7,   name:'Spinach Salad with Olive & Crispy Spinach', serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'',                                  serving:''},
+  ]},
+  { id:'n8', title:'Night 8 — Dinner', sub:'Muharram 8', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Shahi Nakza (Royal Sweet Dish)',    serving:''},
+    {cat:3,   name:'Sukho Gosht (Dry Spiced Meat)',     serving:''},
+    {cat:4,   name:'Potato & Methi Curry with Gravy',   serving:'Serve with Roti or Rice'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Bhel Salad',                        serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'n9', title:'Night 9 — Dinner', sub:'Muharram 9', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Red Lentil Halwa',                  serving:''},
+    {cat:3,   name:'Veg Pasta',                         serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Garlic Bread / Naan',        serving:''},
+    {cat:'6a',name:'Sticky Rice (Beetha Chawal)',        serving:''},
+    {cat:'6b',name:'Coconut Meat Gravy',                serving:'Serve with Rice'},
+    {cat:7,   name:'Carrot Salad with Vinegar',         serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'d9', title:'Day 9 — Lunch', sub:'Muharram 9', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Ragza Pens (Spiced Chickpea Pancake)', serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'',                                  serving:''},
+    {cat:'6a',name:'Hasha with Meat',                   serving:''},
+    {cat:'6b',name:'',                                  serving:''},
+    {cat:7,   name:'Yogurt with Cereal / Cornflakes',   serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Honey Water',                       serving:''},
+  ]},
+  { id:'na', title:'Night of Ashura — Dinner', sub:'Muharram 10', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Ice Cream',                         serving:''},
+    {cat:3,   name:'Salted Meat Pieces (Namkeen Gosht)', serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'Whole Red Lentil Dal',              serving:'Serve with Rice'},
+    {cat:7,   name:'Spiced Potatoes (Masala Bateta)',   serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Fresh Fruit Juice',                  serving:''},
+  ]},
+  { id:'da', title:'Day of Ashura — Lunch', sub:'Muharram 10', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Semolina Halwa with Charoli',       serving:''},
+    {cat:3,   name:'',                                  serving:''},
+    {cat:4,   name:'Haji (Spiced Minced Meat)',         serving:'Serve with Roti'},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Khichdi',                           serving:''},
+    {cat:'6b',name:'Kadhi (Optional)',                   serving:'Serve with Khichdi'},
+    {cat:7,   name:'',                                  serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Yogurt (Packed)',                   serving:''},
+  ]},
+  { id:'d12', title:'12th — Lunch', sub:'Muharram 12', items:[
+    {cat:1,   name:'Salt',                              serving:''},
+    {cat:2,   name:'Halwa (Sweet Pudding)',              serving:''},
+    {cat:3,   name:'Local Kharas (Vegetable or Meat)',  serving:''},
+    {cat:4,   name:'',                                  serving:''},
+    {cat:5,   name:'Roti / Manda / Naan',               serving:''},
+    {cat:'6a',name:'Plain Rice',                        serving:''},
+    {cat:'6b',name:'Dal Gosht (Lentil Meat Gravy)',     serving:'Serve with Rice'},
+    {cat:7,   name:'Pickle (Achar)',                    serving:''},
+    {cat:8,   name:'Uncut Whole Fruit',                  serving:''},
+    {cat:9,   name:'Juice / Sharbat',                   serving:''},
+  ]},
+];
+
+// ─── State ──────────────────────────────────────────────────
+let currentItems = []; // working copy of items for current meal
+
+// ─── Init ───────────────────────────────────────────────────
+(function init() {
+  // Populate meal dropdown
+  const sel = document.getElementById('mealSelect');
+  MEALS.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.title + (m.sub ? '  (' + m.sub + ')' : '');
+    sel.appendChild(opt);
+  });
+
+  // Default date = today
+  const today = new Date();
+  document.getElementById('prepDate').value = today.toISOString().slice(0,10);
+
+  // Build legend
+  buildLegend();
+
+  // Auto-load first meal
+  sel.value = 'n1';
+  loadMeal();
+})();
+
+function buildLegend() {
+  const lg = document.getElementById('legend');
+  Object.entries(CATS).forEach(([k,v]) => {
+    lg.innerHTML += `<div class="legend-item">
+      <div class="legend-dot" style="${catColorStyle(v.color)}"></div>
+      <span>${v.label}</span>
+    </div>`;
+  });
+}
+
+// ─── Load Meal → Populate Table ─────────────────────────────
+function loadMeal() {
+  const id = document.getElementById('mealSelect').value;
+  const meal = MEALS.find(m => m.id === id);
+  if (!meal) return;
+
+  // Deep copy so edits don't mutate master data
+  currentItems = meal.items.map(i => ({ ...i, qty: 1 }));
+
+  const tbody = document.getElementById('itemsBody');
+  tbody.innerHTML = '';
+
+  currentItems.forEach((item, idx) => {
+    const cat = CATS[item.cat];
+    const empty = !item.name;
+    const tr = document.createElement('tr');
+    if (empty) tr.className = 'dimmed';
+    tr.innerHTML = `
+      <td style="text-align:center">
+        <input type="checkbox" id="chk${idx}" ${empty ? '' : 'checked'}>
+      </td>
+      <td>
+        <span class="cat-chip" style="${catColorStyle(cat.color)}">
+          ${cat.label}
+        </span>
+      </td>
+      <td>
+        <input type="text" id="name${idx}" value="${item.name}"
+          oninput="currentItems[${idx}].name=this.value;refreshPreview()"
+          placeholder="(not served this meal)">
+      </td>
+      <td>
+        <input type="text" id="srv${idx}" value="${item.serving}"
+          oninput="currentItems[${idx}].serving=this.value;refreshPreview()"
+          placeholder="Serving style…">
+      </td>
+      <td style="text-align:center">
+        <input type="number" id="qty${idx}" value="1" min="1" max="99"
+          style="width:50px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;text-align:center"
+          oninput="currentItems[${idx}].qty=parseInt(this.value)||1;refreshPreview()">
+      </td>`;
+    tbody.appendChild(tr);
+  });
+
+  refreshPreview();
+}
+
+function selectAll(checked) {
+  currentItems.forEach((_, idx) => {
+    const chk = document.getElementById('chk'+idx);
+    if (chk) chk.checked = checked;
+  });
+}
+
+// ─── Screen Preview ─────────────────────────────────────────
+function refreshPreview() {
+  const size = document.getElementById('labelSize').value;
+  const dateVal = document.getElementById('prepDate').value;
+  const dateStr = dateVal
+    ? new Date(dateVal + 'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+    : '';
+
+  const grid = document.getElementById('previewGrid');
+  grid.innerHTML = '';
+
+  const selected = getSelectedItems();
+  if (!selected.length) {
+    document.getElementById('previewSection').style.display = 'none';
+    return;
+  }
+  document.getElementById('previewSection').style.display = 'block';
+
+  const previewH3 = document.querySelector('#previewSection h3');
+  previewH3.textContent = `Label Preview — ${selected.length} label${selected.length !== 1 ? 's' : ''} total`;
+
+  selected.forEach(item => {
+    const cat = CATS[item.cat];
+    const div = document.createElement('div');
+    div.className = `preview-label size-${size}`;
+    div.innerHTML = `
+      <div class="preview-stripe" style="background:${cat.color}"></div>
+      <div class="preview-body">
+        <div class="preview-cat">${cat.label}</div>
+        <div class="preview-name">${item.name || '—'}</div>
+        ${item.serving ? `<div class="preview-serving">${item.serving}</div>` : ''}
+        ${dateStr ? `<div class="preview-date">Prep: ${dateStr}</div>` : ''}
+      </div>`;
+    grid.appendChild(div);
+  });
+}
+
+// ─── Get Selected Items (expanded by qty) ───────────────────
+function getSelectedItems() {
+  const expanded = [];
+  currentItems.forEach((item, idx) => {
+    const chk = document.getElementById('chk'+idx);
+    if (chk && chk.checked && item.name.trim()) {
+      const qty = parseInt(document.getElementById('qty'+idx)?.value) || 1;
+      for (let q = 0; q < qty; q++) expanded.push(item);
+    }
+  });
+  return expanded;
+}
+
+// ─── Print ───────────────────────────────────────────────────
+function printLabels() {
+  const size = document.getElementById('labelSize').value;
+  const dateVal = document.getElementById('prepDate').value;
+  const dateStr = dateVal
+    ? new Date(dateVal + 'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+    : '';
+
+  const selected = getSelectedItems();
+  if (!selected.length) {
+    alert('No items selected to print.');
+    return;
+  }
+
+  const maxPerSheet = size === 'small' ? 30 : 10;
+  const sheetClass = size === 'small' ? 'sheet-small' : 'sheet-large';
+
+  // Split into pages
+  const pages = [];
+  for (let i = 0; i < selected.length; i += maxPerSheet) {
+    pages.push(selected.slice(i, i + maxPerSheet));
+  }
+
+  const printArea = document.getElementById('print-area');
+  printArea.innerHTML = '';
+
+  pages.forEach(pageItems => {
+    const sheet = document.createElement('div');
+    sheet.className = `label-sheet ${sheetClass}`;
+
+    // Fill up to maxPerSheet with labels (pad with empties)
+    for (let i = 0; i < maxPerSheet; i++) {
+      const item = pageItems[i];
+      const cell = document.createElement('div');
+      cell.className = 'lbl';
+
+      if (item) {
+        const cat = CATS[item.cat];
+        cell.innerHTML = `
+          <div class="lbl-stripe" style="background:${cat.color}"></div>
+          <div class="lbl-body">
+            <div class="lbl-cat">${cat.label}</div>
+            <div class="lbl-name">${item.name}</div>
+            ${item.serving ? `<div class="lbl-srv">${item.serving}</div>` : ''}
+            ${dateStr ? `<div class="lbl-date">Prep: ${dateStr}</div>` : ''}
+          </div>`;
+      }
+      // Empty cells just render as blank label spaces
+      sheet.appendChild(cell);
+    }
+
+    printArea.appendChild(sheet);
+  });
+
+  window.print();
+}
+</script>
+</body>
+</html>

@@ -133,3 +133,30 @@ export interface AttendanceRecord {
   notes?: string;
   createdAt: number;
 }
+
+export type LeftoverContainerType =
+  | "full_aluminum_tray"
+  | "half_aluminum_tray"
+  | "bucket_5gal"
+  | "container_16oz"
+  | "container_24oz"
+  | "container_32oz"
+  | "crate";
+
+export interface LeftoverItem {
+  id: string;
+  containerType: LeftoverContainerType;
+  contents: string;
+  count: number;
+}
+
+export interface LeftoverRecord {
+  id: string;
+  eventId: string;
+  date: string;
+  items: LeftoverItem[];
+  submittedBy: string;
+  submittedByName?: string;
+  createdAt: number;
+  updatedAt: number;
+}
